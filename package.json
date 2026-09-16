@@ -1,0 +1,51 @@
+{
+  "name": "html-content-editor",
+  "version": "0.1.0",
+  "description": "Edit visible text in existing HTML files without rewriting their structure or styles.",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "build:win": "electron-builder --win nsis portable --x64"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3"
+  },
+  "dependencies": {
+    "diff": "9.0.0",
+    "parse5": "8.0.1"
+  },
+  "build": {
+    "appId": "io.github.antidark0605.htmlcontenteditor",
+    "productName": "HTML Content Editor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "HTML-Content-Editor-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "HTML-Content-Editor-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}
