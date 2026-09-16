@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTML Content Editor</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <strong>HTML Content Editor</strong>
+      <span class="tagline">Edit text. Preserve layout.</span>
+    </div>
+
+    <div class="file-actions">
+      <button id="openButton" class="primary">Open HTML</button>
+      <button id="saveButton" disabled>Save</button>
+      <button id="saveAsButton" disabled>Save As</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="mode-tabs" role="tablist" aria-label="Editor mode">
+      <button class="mode active" data-mode="edit" role="tab">Edit</button>
+      <button class="mode" data-mode="preview" role="tab">Preview</button>
+      <button class="mode" data-mode="diff" role="tab">Diff</button>
+    </div>
+
+    <div class="history-actions">
+      <button id="undoButton" disabled title="Undo (Ctrl+Z)">Undo</button>
+      <button id="redoButton" disabled title="Redo (Ctrl+Y)">Redo</button>
+    </div>
+
+    <div class="search-box">
+      <input id="searchInput" type="search" placeholder="Find visible text…" disabled>
+      <button id="searchNextButton" disabled>Next</button>
+      <span id="searchCount"></span>
+    </div>
+  </div>
+
+  <main>
+    <section id="welcome" class="welcome">
+      <div class="welcome-card">
+        <h1>Edit HTML text without wrestling with tags.</h1>
+        <p>Open an existing <code>.html</code> file, click highlighted text, edit it, preview the real page, review the diff, then save.</p>
+        <button id="welcomeOpenButton" class="primary large">Open an HTML file</button>
+        <ul>
+          <li>Styles and HTML tags are not rewritten when saving text edits.</li>
+          <li>A backup is created automatically before the first overwrite.</li>
+          <li>Page JavaScript is disabled in Edit and Preview for safety.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <div class="status-bar">
+        <div>
+          <span id="fileName" class="file-name"></span>
+          <span id="dirtyBadge" class="dirty-badge hidden">Unsaved</span>
+        </div>
+        <div class="status-right">
+          <span id="editableCount"></span>
+          <span id="scriptWarning" class="warning hidden">Page scripts disabled</span>
+        </div>
+      </div>
+
+      <div id="frameHost" class="frame-host">
+        <iframe
+          id="pageFrame"
+          title="HTML page editor"
+          sandbox="allow-same-origin"
+        ></iframe>
+      </div>
+
+      <div id="diffPanel" class="diff-panel hidden" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
