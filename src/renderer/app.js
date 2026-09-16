@@ -29,7 +29,8 @@ const state = {
   undoStack: [],
   redoStack: [],
   searchMatches: [],
-  searchIndex: -1
+  searchIndex: -1,
+  pendingCommit: Promise.resolve()
 };
 
 function escapeHtmlText(value) {
@@ -177,6 +178,38 @@ async function recordEdit(id, value, beforeOverride = null) {
   updateHistoryButtons();
 }
 
+async function commitEditableElement(editable) {
+  if (!editable?.matches?.('[data-hce-id]')) return;
+
+  const id = editable.dataset.hceId;
+  const before = editable.dataset.hceBefore ?? currentValueFor(id);
+  const after = editable.textContent ?? before;
+
+  if (after !== before) {
+    await recordEdit(id, after, before);
+    editable.dataset.hceBefore = after;
+  }
+}
+
+function queueEditableCommit(editable) {
+  state.pendingCommit = state.pendingCommit
+    .catch(() => {})
+    .then(() => commitEditableElement(editable));
+
+  return state.pendingCommit;
+}
+
+async function flushPendingEdits() {
+  const active = elements.pageFrame.contentDocument?.activeElement;
+
+  if (active?.matches?.('[data-hce-id]')) {
+    await queueEditableCommit(active);
+    active.blur();
+  }
+
+  await state.pendingCommit;
+}
+
 function wireEditableFrame() {
   const doc = elements.pageFrame.contentDocument;
   if (!doc) return;
@@ -207,14 +240,8 @@ function wireEditableFrame() {
       }
     });
 
-    editable.addEventListener('blur', async () => {
-      const id = editable.dataset.hceId;
-      const before = editable.dataset.hceBefore ?? currentValueFor(id);
-      const after = editable.textContent ?? before;
-
-      if (after !== before) {
-        await recordEdit(id, after, before);
-      }
+    editable.addEventListener('blur', () => {
+      void queueEditableCommit(editable);
     });
   }
 
@@ -273,11 +300,7 @@ async function renderDiff() {
 async function setMode(mode) {
   if (!state.session) return;
 
-  const active = elements.pageFrame.contentDocument?.activeElement;
-  if (active?.matches?.('[data-hce-id]')) {
-    active.blur();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+  await flushPendingEdits();
 
   state.mode = mode;
   for (const button of elements.modeButtons) {
@@ -315,6 +338,7 @@ function loadSession(session) {
 }
 
 async function openHtml() {
+  if (state.session) await flushPendingEdits();
   const result = await window.hce.openHtml();
   if (result.error) {
     showToast(`Open failed: ${result.error}`);
@@ -327,7 +351,9 @@ async function openHtml() {
 }
 
 async function save() {
-  if (!state.session || !state.session.dirty) return;
+  if (!state.session) return;
+  await flushPendingEdits();
+  if (!state.session.dirty) return;
 
   const result = await window.hce.save(state.workingSource);
   loadSession(result.session);
@@ -341,6 +367,7 @@ async function save() {
 
 async function saveAs() {
   if (!state.session) return;
+  await flushPendingEdits();
 
   const result = await window.hce.saveAs(state.workingSource);
   if (!result.cancelled && result.session) {
