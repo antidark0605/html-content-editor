@@ -1,8 +1,14 @@
+import { clampZoom, COMPARE_ZOOM_STEP, scrollRatio, scrollTopForRatio } from '../compare-utils.mjs';
+
 const elements = {
   openButton: document.querySelector('#openButton'),
   welcomeOpenButton: document.querySelector('#welcomeOpenButton'),
   saveButton: document.querySelector('#saveButton'),
   saveAsButton: document.querySelector('#saveAsButton'),
+  editorFileActions: document.querySelector('#editorFileActions'),
+  workspaceModeButtons: [...document.querySelectorAll('[data-workspace-mode]')],
+  editorTools: document.querySelector('#editorTools'),
+  compareTools: document.querySelector('#compareTools'),
   undoButton: document.querySelector('#undoButton'),
   redoButton: document.querySelector('#redoButton'),
   searchInput: document.querySelector('#searchInput'),
@@ -17,6 +23,23 @@ const elements = {
   frameHost: document.querySelector('#frameHost'),
   pageFrame: document.querySelector('#pageFrame'),
   diffPanel: document.querySelector('#diffPanel'),
+  compareWorkspace: document.querySelector('#compareWorkspace'),
+  compareLeftFrame: document.querySelector('#compareLeftFrame'),
+  compareRightFrame: document.querySelector('#compareRightFrame'),
+  compareLeftName: document.querySelector('#compareLeftName'),
+  compareRightName: document.querySelector('#compareRightName'),
+  compareLeftScriptWarning: document.querySelector('#compareLeftScriptWarning'),
+  compareRightScriptWarning: document.querySelector('#compareRightScriptWarning'),
+  openCompareLeftButton: document.querySelector('#openCompareLeftButton'),
+  openCompareRightButton: document.querySelector('#openCompareRightButton'),
+  reloadCompareLeftButton: document.querySelector('#reloadCompareLeftButton'),
+  reloadCompareRightButton: document.querySelector('#reloadCompareRightButton'),
+  swapCompareButton: document.querySelector('#swapCompareButton'),
+  syncScrollCheckbox: document.querySelector('#syncScrollCheckbox'),
+  zoomOutButton: document.querySelector('#zoomOutButton'),
+  zoomResetButton: document.querySelector('#zoomResetButton'),
+  zoomInButton: document.querySelector('#zoomInButton'),
+  zoomLabel: document.querySelector('#zoomLabel'),
   modeButtons: [...document.querySelectorAll('[data-mode]')],
   toast: document.querySelector('#toast')
 };
@@ -30,7 +53,12 @@ const state = {
   redoStack: [],
   searchMatches: [],
   searchIndex: -1,
-  pendingCommit: Promise.resolve()
+  pendingCommit: Promise.resolve(),
+  workspaceMode: 'editor',
+  compare: { left: null, right: null },
+  compareZoom: 1,
+  syncScroll: true,
+  syncingScroll: false
 };
 
 function escapeHtmlText(value) {
@@ -63,9 +91,13 @@ function injectIntoHead(html, addition) {
   return `<head>${addition}</head>${html}`;
 }
 
+function baseTagFor(source, baseHref) {
+  if (/<base\\b/i.test(source ?? '')) return '';
+  return '<base href="' + escapeAttribute(baseHref ?? '') + '">';
+}
+
 function baseTag() {
-  if (/<base\b/i.test(state.session.source)) return '';
-  return `<base href="${escapeAttribute(state.session.baseHref)}">`;
+  return baseTagFor(state.session.source, state.session.baseHref);
 }
 
 function editorStyle() {
@@ -119,6 +151,17 @@ function buildEditableDocument() {
 
 function buildPreviewDocument() {
   return injectIntoHead(state.workingSource, baseTag());
+}
+
+function emptyCompareDocument(side) {
+  const label = side === 'left' ? 'Left' : 'Right';
+  return '<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#8a94a6;font:14px system-ui,sans-serif}.card{text-align:center;padding:24px}.card strong{display:block;color:#536071;margin-bottom:6px}</style></head><body><div class="card"><strong>' + label + ' page</strong>Open an HTML file to compare.</div></body></html>';
+}
+
+function buildCompareDocument(side) {
+  const page = state.compare[side];
+  if (!page) return emptyCompareDocument(side);
+  return injectIntoHead(page.source, baseTagFor(page.source, page.baseHref));
 }
 
 function showToast(message) {
@@ -312,6 +355,174 @@ async function setMode(mode) {
   if (mode === 'diff') await renderDiff();
 }
 
+
+function refreshWorkspaceVisibility() {
+  const editorActive = state.workspaceMode === 'editor';
+
+  elements.editorFileActions.classList.toggle('hidden', !editorActive);
+  elements.editorTools.classList.toggle('hidden', !editorActive);
+  elements.compareTools.classList.toggle('hidden', editorActive);
+  elements.compareWorkspace.classList.toggle('hidden', editorActive);
+
+  if (editorActive) {
+    elements.welcome.classList.toggle('hidden', Boolean(state.session));
+    elements.workspace.classList.toggle('hidden', !state.session);
+  } else {
+    elements.welcome.classList.add('hidden');
+    elements.workspace.classList.add('hidden');
+  }
+
+  for (const button of elements.workspaceModeButtons) {
+    button.classList.toggle('active', button.dataset.workspaceMode === state.workspaceMode);
+  }
+}
+
+async function setWorkspaceMode(mode) {
+  if (mode !== 'editor' && mode !== 'compare') return;
+  if (state.workspaceMode === 'editor' && mode !== 'editor' && state.session) {
+    await flushPendingEdits();
+  }
+
+  state.workspaceMode = mode;
+  refreshWorkspaceVisibility();
+}
+
+function compareElementsFor(side) {
+  if (side === 'left') {
+    return {
+      frame: elements.compareLeftFrame,
+      name: elements.compareLeftName,
+      warning: elements.compareLeftScriptWarning,
+      reload: elements.reloadCompareLeftButton
+    };
+  }
+
+  return {
+    frame: elements.compareRightFrame,
+    name: elements.compareRightName,
+    warning: elements.compareRightScriptWarning,
+    reload: elements.reloadCompareRightButton
+  };
+}
+
+function scrollingElement(frame) {
+  return frame.contentDocument?.scrollingElement
+    ?? frame.contentDocument?.documentElement
+    ?? null;
+}
+
+function applyCompareZoom(frame) {
+  const doc = frame.contentDocument;
+  if (!doc?.documentElement) return;
+  doc.documentElement.style.zoom = String(state.compareZoom);
+}
+
+function setCompareZoom(nextZoom) {
+  state.compareZoom = clampZoom(nextZoom);
+  elements.zoomLabel.textContent = Math.round(state.compareZoom * 100) + '%';
+  applyCompareZoom(elements.compareLeftFrame);
+  applyCompareZoom(elements.compareRightFrame);
+}
+
+function syncScrollFrom(side) {
+  if (!state.syncScroll || state.syncingScroll) return;
+
+  const sourceFrame = side === 'left' ? elements.compareLeftFrame : elements.compareRightFrame;
+  const targetFrame = side === 'left' ? elements.compareRightFrame : elements.compareLeftFrame;
+  const sourceScroller = scrollingElement(sourceFrame);
+  const targetScroller = scrollingElement(targetFrame);
+  if (!sourceScroller || !targetScroller) return;
+
+  const ratio = scrollRatio(
+    sourceScroller.scrollTop,
+    sourceScroller.scrollHeight,
+    sourceScroller.clientHeight
+  );
+
+  state.syncingScroll = true;
+  targetScroller.scrollTop = scrollTopForRatio(
+    ratio,
+    targetScroller.scrollHeight,
+    targetScroller.clientHeight
+  );
+
+  window.requestAnimationFrame(() => {
+    state.syncingScroll = false;
+  });
+}
+
+function wireCompareFrame(side) {
+  const { frame } = compareElementsFor(side);
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  if (!doc || !win) return;
+
+  applyCompareZoom(frame);
+
+  doc.addEventListener(
+    'click',
+    (event) => {
+      const anchor = event.target.closest?.('a');
+      if (anchor) event.preventDefault();
+    },
+    true
+  );
+
+  win.addEventListener('scroll', () => syncScrollFrom(side), { passive: true });
+}
+
+function updateCompareHeader(side) {
+  const page = state.compare[side];
+  const controls = compareElementsFor(side);
+  controls.name.textContent = page?.fileName ?? 'No file open';
+  controls.name.title = page?.filePath ?? '';
+  controls.warning.classList.toggle('hidden', !page?.hasScripts);
+  controls.reload.disabled = !page;
+}
+
+function renderCompareSide(side) {
+  const { frame } = compareElementsFor(side);
+  updateCompareHeader(side);
+  frame.onload = () => wireCompareFrame(side);
+  frame.setAttribute('sandbox', 'allow-same-origin');
+  frame.srcdoc = buildCompareDocument(side);
+}
+
+async function openCompare(side) {
+  const result = await window.hce.openCompare(side);
+  if (result.error) {
+    showToast('Open failed: ' + result.error);
+    return;
+  }
+
+  if (!result.cancelled && result.page) {
+    state.compare[side] = result.page;
+    renderCompareSide(side);
+  }
+}
+
+async function reloadCompare(side) {
+  const result = await window.hce.reloadCompare(side);
+  if (result.error) {
+    showToast('Reload failed: ' + result.error);
+    return;
+  }
+
+  if (!result.missing && result.page) {
+    state.compare[side] = result.page;
+    renderCompareSide(side);
+    showToast((side === 'left' ? 'Left' : 'Right') + ' page reloaded.');
+  }
+}
+
+async function swapCompare() {
+  const result = await window.hce.swapCompare();
+  state.compare.left = result.left;
+  state.compare.right = result.right;
+  renderCompareSide('left');
+  renderCompareSide('right');
+}
+
 function loadSession(session) {
   state.session = session;
   state.edits = {};
@@ -321,8 +532,7 @@ function loadSession(session) {
   state.searchMatches = [];
   state.searchIndex = -1;
 
-  elements.welcome.classList.add('hidden');
-  elements.workspace.classList.remove('hidden');
+  refreshWorkspaceVisibility();
   elements.fileName.textContent = session.fileName;
   elements.fileName.title = session.filePath;
   elements.editableCount.textContent = `${session.textNodes.length} editable text block${session.textNodes.length === 1 ? '' : 's'}`;
@@ -464,6 +674,22 @@ function runSearch(advance = false) {
   elements.searchNextButton.disabled = false;
 }
 
+for (const button of elements.workspaceModeButtons) {
+  button.addEventListener('click', () => void setWorkspaceMode(button.dataset.workspaceMode));
+}
+
+elements.openCompareLeftButton.addEventListener('click', () => void openCompare('left'));
+elements.openCompareRightButton.addEventListener('click', () => void openCompare('right'));
+elements.reloadCompareLeftButton.addEventListener('click', () => void reloadCompare('left'));
+elements.reloadCompareRightButton.addEventListener('click', () => void reloadCompare('right'));
+elements.swapCompareButton.addEventListener('click', () => void swapCompare());
+elements.syncScrollCheckbox.addEventListener('change', () => {
+  state.syncScroll = elements.syncScrollCheckbox.checked;
+});
+elements.zoomOutButton.addEventListener('click', () => setCompareZoom(state.compareZoom - COMPARE_ZOOM_STEP));
+elements.zoomResetButton.addEventListener('click', () => setCompareZoom(1));
+elements.zoomInButton.addEventListener('click', () => setCompareZoom(state.compareZoom + COMPARE_ZOOM_STEP));
+
 elements.openButton.addEventListener('click', openHtml);
 elements.welcomeOpenButton.addEventListener('click', openHtml);
 elements.saveButton.addEventListener('click', save);
@@ -486,9 +712,15 @@ document.addEventListener('keydown', (event) => {
 
   if (modifier && event.key.toLowerCase() === 'o') {
     event.preventDefault();
-    void openHtml();
+    if (state.workspaceMode === 'compare') {
+      void openCompare(state.compare.left ? 'right' : 'left');
+    } else {
+      void openHtml();
+    }
     return;
   }
+
+  if (state.workspaceMode !== 'editor') return;
 
   if (modifier && event.key.toLowerCase() === 's') {
     event.preventDefault();
@@ -522,6 +754,11 @@ document.addEventListener('keydown', (event) => {
     void redo();
   }
 });
+
+renderCompareSide('left');
+renderCompareSide('right');
+setCompareZoom(1);
+refreshWorkspaceVisibility();
 
 window.hce.getSession().then((existing) => {
   if (existing) loadSession(existing);

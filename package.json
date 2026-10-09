@@ -1,6 +1,6 @@
 {
   "name": "html-content-editor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Edit visible text in existing HTML files without rewriting their structure or styles.",
   "type": "module",
   "main": "src/main.mjs",
@@ -31,11 +31,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

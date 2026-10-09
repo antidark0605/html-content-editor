@@ -19,15 +19,32 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 - Search visible editable text
 - Save / Save As
 - Create a one-time `*.hce-backup.html` before the first overwrite
+- Side-by-side Compare workspace for two HTML files
+- Optional proportional sync scrolling, Swap, Reload, and shared Zoom in Compare
 - Windows installer and portable executable built by GitHub Actions
 
 ## Safety model
 
-HTML can contain executable JavaScript. In v0.1, page scripts are intentionally **disabled** in both Edit and Preview mode. CSS, images, and normal HTML layout can still render.
+HTML can contain executable JavaScript. Page scripts are intentionally **disabled** in Edit, Preview, and Compare mode. CSS, images, and normal HTML layout can still render.
 
 This repository is public. Do not commit private/internal HTML samples, credentials, API keys, customer data, or proprietary material.
 
 Windows builds are currently unsigned, so Microsoft SmartScreen may warn when launching a downloaded build. Code signing can be added later.
+
+## Compare two pages
+
+Switch to **Compare**, then open a left and right HTML file. Each side is rendered independently with local relative CSS/images resolved from that file's directory.
+
+Compare includes:
+
+- Open / Reload on each side
+- Swap left and right
+- Proportional **Sync scroll** for normal page scrolling
+- Shared zoom from 50% to 200%
+- File names and full paths on hover
+- JavaScript disabled on both sides
+
+Sync scroll follows each page's overall scroll percentage, so pages with different section heights stay roughly aligned. Nested custom scroll containers are not synchronized yet.
 
 ## Current limitations
 

@@ -56,3 +56,16 @@ test('editable rendering adds markers without changing the saved source', () => 
   assert.match(rendered, /data-hce-id="text-1"/);
   assert.equal(applyTextEdits(source, nodes, {}), source);
 });
+
+
+test('compare utility math clamps zoom and maps proportional scrolling', async () => {
+  const { clampZoom, scrollRatio, scrollTopForRatio } = await import('../src/compare-utils.mjs');
+
+  assert.equal(clampZoom(0.1), 0.5);
+  assert.equal(clampZoom(1.25), 1.25);
+  assert.equal(clampZoom(9), 2);
+
+  assert.equal(scrollRatio(450, 1200, 300), 0.5);
+  assert.equal(scrollTopForRatio(0.5, 2200, 400), 900);
+  assert.equal(scrollRatio(10, 200, 300), 0);
+});

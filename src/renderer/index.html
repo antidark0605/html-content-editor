@@ -13,7 +13,7 @@
       <span class="tagline">Edit text. Preserve layout.</span>
     </div>
 
-    <div class="file-actions">
+    <div id="editorFileActions" class="file-actions">
       <button id="openButton" class="primary">Open HTML</button>
       <button id="saveButton" disabled>Save</button>
       <button id="saveAsButton" disabled>Save As</button>
@@ -21,21 +21,41 @@
   </header>
 
   <div class="toolbar">
-    <div class="mode-tabs" role="tablist" aria-label="Editor mode">
-      <button class="mode active" data-mode="edit" role="tab">Edit</button>
-      <button class="mode" data-mode="preview" role="tab">Preview</button>
-      <button class="mode" data-mode="diff" role="tab">Diff</button>
+    <div class="workspace-tabs" role="tablist" aria-label="Workspace">
+      <button class="active" data-workspace-mode="editor" role="tab">Editor</button>
+      <button data-workspace-mode="compare" role="tab">Compare</button>
     </div>
 
-    <div class="history-actions">
-      <button id="undoButton" disabled title="Undo (Ctrl+Z)">Undo</button>
-      <button id="redoButton" disabled title="Redo (Ctrl+Y)">Redo</button>
+    <div id="editorTools" class="editor-tools">
+      <div class="mode-tabs" role="tablist" aria-label="Editor mode">
+        <button class="mode active" data-mode="edit" role="tab">Edit</button>
+        <button class="mode" data-mode="preview" role="tab">Preview</button>
+        <button class="mode" data-mode="diff" role="tab">Diff</button>
+      </div>
+
+      <div class="history-actions">
+        <button id="undoButton" disabled title="Undo (Ctrl+Z)">Undo</button>
+        <button id="redoButton" disabled title="Redo (Ctrl+Y)">Redo</button>
+      </div>
+
+      <div class="search-box">
+        <input id="searchInput" type="search" placeholder="Find visible text…" disabled>
+        <button id="searchNextButton" disabled>Next</button>
+        <span id="searchCount"></span>
+      </div>
     </div>
 
-    <div class="search-box">
-      <input id="searchInput" type="search" placeholder="Find visible text…" disabled>
-      <button id="searchNextButton" disabled>Next</button>
-      <span id="searchCount"></span>
+    <div id="compareTools" class="compare-tools hidden">
+      <label class="sync-toggle">
+        <input id="syncScrollCheckbox" type="checkbox" checked>
+        Sync scroll
+      </label>
+      <button id="swapCompareButton" title="Swap left and right pages">Swap</button>
+      <div class="zoom-controls" aria-label="Compare zoom">
+        <button id="zoomOutButton" title="Zoom out">−</button>
+        <button id="zoomResetButton" title="Reset zoom"><span id="zoomLabel">100%</span></button>
+        <button id="zoomInButton" title="Zoom in">+</button>
+      </div>
     </div>
   </div>
 
@@ -48,7 +68,8 @@
         <ul>
           <li>Styles and HTML tags are not rewritten when saving text edits.</li>
           <li>A backup is created automatically before the first overwrite.</li>
-          <li>Page JavaScript is disabled in Edit and Preview for safety.</li>
+          <li>Use Compare to open two HTML files side by side.</li>
+          <li>Page JavaScript is disabled in Edit, Preview, and Compare for safety.</li>
         </ul>
       </div>
     </section>
@@ -74,6 +95,50 @@
       </div>
 
       <div id="diffPanel" class="diff-panel hidden" aria-live="polite"></div>
+    </section>
+
+    <section id="compareWorkspace" class="compare-workspace hidden">
+      <div class="compare-grid">
+        <article class="compare-pane">
+          <div class="compare-pane-header">
+            <div class="compare-file-meta">
+              <strong>Left</strong>
+              <span id="compareLeftName" class="compare-file-name">No file open</span>
+              <span id="compareLeftScriptWarning" class="warning hidden">Scripts disabled</span>
+            </div>
+            <div class="compare-pane-actions">
+              <button id="openCompareLeftButton" class="primary">Open Left</button>
+              <button id="reloadCompareLeftButton" disabled>Reload</button>
+            </div>
+          </div>
+          <iframe
+            id="compareLeftFrame"
+            class="compare-frame"
+            title="Left HTML comparison page"
+            sandbox="allow-same-origin"
+          ></iframe>
+        </article>
+
+        <article class="compare-pane">
+          <div class="compare-pane-header">
+            <div class="compare-file-meta">
+              <strong>Right</strong>
+              <span id="compareRightName" class="compare-file-name">No file open</span>
+              <span id="compareRightScriptWarning" class="warning hidden">Scripts disabled</span>
+            </div>
+            <div class="compare-pane-actions">
+              <button id="openCompareRightButton" class="primary">Open Right</button>
+              <button id="reloadCompareRightButton" disabled>Reload</button>
+            </div>
+          </div>
+          <iframe
+            id="compareRightFrame"
+            class="compare-frame"
+            title="Right HTML comparison page"
+            sandbox="allow-same-origin"
+          ></iframe>
+        </article>
+      </div>
     </section>
   </main>
 
