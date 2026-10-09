@@ -92,7 +92,7 @@ function injectIntoHead(html, addition) {
 }
 
 function baseTagFor(source, baseHref) {
-  if (/<base\\b/i.test(source ?? '')) return '';
+  if (/<base\b/i.test(source ?? '')) return '';
   return '<base href="' + escapeAttribute(baseHref ?? '') + '">';
 }
 

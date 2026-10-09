@@ -70,7 +70,7 @@ function comparePayload(side) {
     fileName: path.basename(slot.filePath),
     source: slot.source,
     baseHref: baseHrefFor(slot.filePath),
-    hasScripts: /<script\\b/i.test(slot.source)
+    hasScripts: /<script\b/i.test(slot.source)
   };
 }
 
