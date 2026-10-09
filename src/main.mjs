@@ -13,6 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
 let session = null;
+let compareSlots = { left: null, right: null };
 let allowClose = false;
 
 function baseHrefFor(filePath) {
@@ -49,6 +50,35 @@ function makeSession(filePath, source) {
 async function readHtmlFile(filePath) {
   const source = await fsp.readFile(filePath, 'utf8');
   return makeSession(filePath, source);
+}
+
+function normalizeCompareSide(side) {
+  if (side !== 'left' && side !== 'right') {
+    throw new Error('Compare side must be left or right.');
+  }
+  return side;
+}
+
+function comparePayload(side) {
+  const normalizedSide = normalizeCompareSide(side);
+  const slot = compareSlots[normalizedSide];
+  if (!slot) return null;
+
+  return {
+    side: normalizedSide,
+    filePath: slot.filePath,
+    fileName: path.basename(slot.filePath),
+    source: slot.source,
+    baseHref: baseHrefFor(slot.filePath),
+    hasScripts: /<script\b/i.test(slot.source)
+  };
+}
+
+async function readCompareFile(side, filePath) {
+  const normalizedSide = normalizeCompareSide(side);
+  const source = await fsp.readFile(filePath, 'utf8');
+  compareSlots[normalizedSide] = { filePath, source };
+  return comparePayload(normalizedSide);
 }
 
 function backupPathFor(filePath) {
@@ -172,6 +202,60 @@ ipcMain.handle('file:open', async () => {
       error: error instanceof Error ? error.message : String(error)
     };
   }
+});
+
+ipcMain.handle('compare:open', async (_event, requestedSide) => {
+  const side = normalizeCompareSide(requestedSide);
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: side === 'left' ? 'Open left HTML file' : 'Open right HTML file',
+    properties: ['openFile'],
+    filters: [
+      { name: 'HTML files', extensions: ['html', 'htm'] },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { cancelled: true };
+  }
+
+  try {
+    return {
+      cancelled: false,
+      page: await readCompareFile(side, result.filePaths[0])
+    };
+  } catch (error) {
+    return {
+      cancelled: true,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+});
+
+ipcMain.handle('compare:reload', async (_event, requestedSide) => {
+  const side = normalizeCompareSide(requestedSide);
+  const slot = compareSlots[side];
+  if (!slot) return { missing: true };
+
+  try {
+    return {
+      missing: false,
+      page: await readCompareFile(side, slot.filePath)
+    };
+  } catch (error) {
+    return {
+      missing: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+});
+
+ipcMain.handle('compare:swap', async () => {
+  [compareSlots.left, compareSlots.right] = [compareSlots.right, compareSlots.left];
+  return {
+    left: comparePayload('left'),
+    right: comparePayload('right')
+  };
 });
 
 ipcMain.handle('html:apply-edits', async (_event, edits) => {
