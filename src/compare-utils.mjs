@@ -19,3 +19,38 @@ export function scrollTopForRatio(ratio, scrollHeight, clientHeight) {
   const safeRatio = Math.min(1, Math.max(0, Number(ratio) || 0));
   return maxScroll * safeRatio;
 }
+
+export function mapAlignedPosition(points, sourcePosition, sourceKey, targetKey) {
+  const usable = (points ?? [])
+    .filter((point) => Number.isFinite(point?.[sourceKey]) && Number.isFinite(point?.[targetKey]))
+    .sort((a, b) => a[sourceKey] - b[sourceKey]);
+
+  if (usable.length === 0) return Number(sourcePosition) || 0;
+  if (usable.length === 1) return usable[0][targetKey];
+
+  const source = Number(sourcePosition) || 0;
+
+  if (source <= usable[0][sourceKey]) {
+    return usable[0][targetKey];
+  }
+
+  const last = usable.at(-1);
+  if (source >= last[sourceKey]) {
+    return last[targetKey];
+  }
+
+  for (let i = 0; i < usable.length - 1; i += 1) {
+    const a = usable[i];
+    const b = usable[i + 1];
+    const start = a[sourceKey];
+    const end = b[sourceKey];
+
+    if (source < start || source > end) continue;
+    if (end === start) return b[targetKey];
+
+    const ratio = (source - start) / (end - start);
+    return a[targetKey] + ratio * (b[targetKey] - a[targetKey]);
+  }
+
+  return last[targetKey];
+}
