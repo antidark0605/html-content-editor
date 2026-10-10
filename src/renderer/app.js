@@ -52,8 +52,9 @@ const elements = {
   previousDifferenceButton: document.querySelector('#previousDifferenceButton'),
   nextDifferenceButton: document.querySelector('#nextDifferenceButton'),
   differenceCount: document.querySelector('#differenceCount'),
-  mergeRightToLeftButton: document.querySelector('#mergeRightToLeftButton'),
-  mergeLeftToRightButton: document.querySelector('#mergeLeftToRightButton'),
+  compareUndoButton: document.querySelector('#compareUndoButton'),
+  compareRedoButton: document.querySelector('#compareRedoButton'),
+  visualMergeGutter: document.querySelector('#visualMergeGutter'),
   syncScrollLabel: document.querySelector('#syncScrollLabel'),
   syncScrollCheckbox: document.querySelector('#syncScrollCheckbox'),
   zoomControls: document.querySelector('#zoomControls'),
@@ -78,6 +79,7 @@ const state = {
   workspaceMode: 'editor',
   compare: { left: null, right: null },
   compareAnalysis: null,
+  compareHistory: { canUndo: false, canRedo: false, undoCount: 0, redoCount: 0 },
   compareView: 'visual',
   activeDifferenceIndex: 0,
   compareZoom: 1,
@@ -502,6 +504,58 @@ function activeHunk() {
   return hunks[index] ?? null;
 }
 
+function sourceHunkRailRatio(hunk) {
+  const renderedRows = [...elements.sourceCompare.querySelectorAll(`[data-hunk-id="${hunk.id}"]`)];
+  const scrollHeight = elements.sourceCompare.scrollHeight;
+
+  if (renderedRows.length > 0 && scrollHeight > 0) {
+    const containerRect = elements.sourceCompare.getBoundingClientRect();
+    const tops = renderedRows.map(
+      (row) => row.getBoundingClientRect().top - containerRect.top + elements.sourceCompare.scrollTop
+    );
+    const bottoms = renderedRows.map(
+      (row) => row.getBoundingClientRect().bottom - containerRect.top + elements.sourceCompare.scrollTop
+    );
+    const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+    return Math.min(1, Math.max(0, center / scrollHeight));
+  }
+
+  const rows = state.compareAnalysis?.source?.rows ?? [];
+  if (rows.length <= 1) return 0.5;
+
+  const indices = [];
+  rows.forEach((row, index) => {
+    if (row.hunkId === hunk.id) indices.push(index);
+  });
+
+  if (indices.length === 0) return 0.5;
+  const middle = (indices[0] + indices.at(-1)) / 2;
+  return Math.min(1, Math.max(0, middle / (rows.length - 1)));
+}
+
+function visualHunkRailRatio(hunk) {
+  if (!state.compareFrameReady.left || !state.compareFrameReady.right) return null;
+
+  const ratios = [];
+
+  for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
+    const doc = frame.contentDocument;
+    const scroller = scrollingElement(frame);
+    if (!doc || !scroller || scroller.scrollHeight <= 0) continue;
+
+    const nodes = [...doc.querySelectorAll(`[data-hce-hunk="${hunk.id}"]`)];
+    if (nodes.length === 0) continue;
+
+    const tops = nodes.map((node) => node.getBoundingClientRect().top + scroller.scrollTop);
+    const bottoms = nodes.map((node) => node.getBoundingClientRect().bottom + scroller.scrollTop);
+    const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+    ratios.push(center / scroller.scrollHeight);
+  }
+
+  if (ratios.length === 0) return null;
+  return Math.min(1, Math.max(0, ratios.reduce((sum, value) => sum + value, 0) / ratios.length));
+}
+
 function updateDifferenceRail() {
   const hunks = currentHunks();
   elements.differenceRail.replaceChildren();
@@ -510,13 +564,37 @@ function updateDifferenceRail() {
     const marker = document.createElement('button');
     marker.type = 'button';
     marker.title = `Difference ${index + 1} of ${hunks.length}`;
-    marker.style.top = hunks.length === 1
-      ? '50%'
-      : `${5 + (index / (hunks.length - 1)) * 90}%`;
+
+    let ratio = state.compareView === 'source'
+      ? sourceHunkRailRatio(hunk)
+      : visualHunkRailRatio(hunk);
+
+    if (!Number.isFinite(ratio)) {
+      ratio = hunks.length === 1 ? 0.5 : index / Math.max(1, hunks.length - 1);
+    }
+
+    marker.style.top = `${Math.max(2, Math.min(98, ratio * 100))}%`;
     marker.classList.toggle('active', index === state.activeDifferenceIndex);
     marker.addEventListener('click', () => setActiveDifference(index, true));
     elements.differenceRail.append(marker);
   });
+}
+
+function updateCompareHistoryControls() {
+  const history = state.compareHistory ?? {};
+  const undoCount = history.undoCount ?? 0;
+  const redoCount = history.redoCount ?? 0;
+
+  elements.compareUndoButton.disabled = !history.canUndo;
+  elements.compareRedoButton.disabled = !history.canRedo;
+  elements.compareUndoButton.textContent = undoCount > 0 ? `Undo (${undoCount})` : 'Undo';
+  elements.compareRedoButton.textContent = redoCount > 0 ? `Redo (${redoCount})` : 'Redo';
+  elements.compareUndoButton.title = undoCount > 0
+    ? `Undo merge, ${undoCount} step${undoCount === 1 ? '' : 's'} available (Ctrl+Z)`
+    : 'Nothing to undo';
+  elements.compareRedoButton.title = redoCount > 0
+    ? `Redo merge, ${redoCount} step${redoCount === 1 ? '' : 's'} available (Ctrl+Y)`
+    : 'Nothing to redo';
 }
 
 function updateDifferenceControls() {
@@ -535,24 +613,85 @@ function updateDifferenceControls() {
 
   elements.previousDifferenceButton.disabled = !hasDifferences;
   elements.nextDifferenceButton.disabled = !hasDifferences;
+  updateCompareHistoryControls();
+  updateDifferenceRail();
+}
 
-  const hunk = activeHunk();
-  const visualMergeable = state.compareView !== 'visual' || Boolean(hunk?.mergeableText);
-  const mergeEnabled = Boolean(hunk) && visualMergeable;
+function visualHunkCenterInGutter(hunk) {
+  const gutterRect = elements.visualMergeGutter.getBoundingClientRect();
+  const values = [];
 
-  elements.mergeRightToLeftButton.disabled = !mergeEnabled;
-  elements.mergeLeftToRightButton.disabled = !mergeEnabled;
+  for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
+    const doc = frame.contentDocument;
+    if (!doc) continue;
 
-  if (state.compareView === 'visual' && hunk && !hunk.mergeableText) {
-    const reason = 'This change adds/removes text blocks. Switch to Source to merge it.';
-    elements.mergeRightToLeftButton.title = reason;
-    elements.mergeLeftToRightButton.title = reason;
-  } else {
-    elements.mergeRightToLeftButton.title = 'Copy selected difference from right to left';
-    elements.mergeLeftToRightButton.title = 'Copy selected difference from left to right';
+    const nodes = [...doc.querySelectorAll(`[data-hce-hunk="${hunk.id}"]`)];
+    if (nodes.length === 0) continue;
+
+    const frameRect = frame.getBoundingClientRect();
+    const tops = nodes.map((node) => frameRect.top + node.getBoundingClientRect().top);
+    const bottoms = nodes.map((node) => frameRect.top + node.getBoundingClientRect().bottom);
+    values.push(((Math.min(...tops) + Math.max(...bottoms)) / 2) - gutterRect.top);
   }
 
-  updateDifferenceRail();
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function renderVisualMergeGutter() {
+  if (state.compareView !== 'visual') return;
+
+  elements.visualMergeGutter.replaceChildren();
+
+  const hunks = state.compareAnalysis?.visual?.hunks ?? [];
+  if (hunks.length === 0) return;
+
+  const index = Math.min(Math.max(state.activeDifferenceIndex, 0), hunks.length - 1);
+  const hunk = hunks[index];
+  const height = Math.max(elements.visualMergeGutter.clientHeight, 36);
+  const y = visualHunkCenterInGutter(hunk);
+
+  if (!Number.isFinite(y)) return;
+
+  const group = document.createElement('div');
+  group.className = 'visual-merge-pair active';
+  group.style.top = `${Math.max(18, Math.min(height - 18, y))}px`;
+
+  const toLeft = document.createElement('button');
+  toLeft.type = 'button';
+  toLeft.textContent = '←';
+  toLeft.title = hunk.mergeableText
+    ? `Copy difference ${index + 1} from right to left`
+    : 'Structural difference: use Source view to merge';
+  toLeft.disabled = !hunk.mergeableText;
+  toLeft.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void mergeDifference('right-to-left', hunk.id);
+  });
+
+  const toRight = document.createElement('button');
+  toRight.type = 'button';
+  toRight.textContent = '→';
+  toRight.title = hunk.mergeableText
+    ? `Copy difference ${index + 1} from left to right`
+    : 'Structural difference: use Source view to merge';
+  toRight.disabled = !hunk.mergeableText;
+  toRight.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void mergeDifference('left-to-right', hunk.id);
+  });
+
+  group.append(toLeft, toRight);
+  elements.visualMergeGutter.append(group);
+}
+
+function scheduleVisualMergeGutter() {
+  if (scheduleVisualMergeGutter.pending) return;
+  scheduleVisualMergeGutter.pending = true;
+  window.requestAnimationFrame(() => {
+    scheduleVisualMergeGutter.pending = false;
+    renderVisualMergeGutter();
+  });
 }
 
 function markActiveVisualHunk() {
@@ -592,33 +731,62 @@ function setActiveDifference(index, shouldScroll = false) {
     for (const row of elements.sourceCompare.querySelectorAll('.active-hunk')) {
       row.classList.remove('active-hunk');
     }
+    for (const pair of elements.sourceCompare.querySelectorAll('.source-merge-pair.active')) {
+      pair.classList.remove('active');
+    }
     const hunk = activeHunk();
     if (!hunk) return;
     const rows = [...elements.sourceCompare.querySelectorAll(`[data-hunk-id="${hunk.id}"]`)];
     rows.forEach((row) => row.classList.add('active-hunk'));
+    const pair = rows.map((row) => row.querySelector('.source-merge-pair')).find(Boolean);
+    pair?.classList.add('active');
     if (shouldScroll && rows[0]) rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
   markActiveVisualHunk();
+  scheduleVisualMergeGutter();
   if (!shouldScroll) return;
 
   const hunk = activeHunk();
   if (!hunk) return;
 
-  state.programmaticUntil.left = performance.now() + 400;
-  state.programmaticUntil.right = performance.now() + 400;
+  state.programmaticUntil.left = performance.now() + 160;
+  state.programmaticUntil.right = performance.now() + 160;
 
   for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
-    const target = frame.contentDocument?.querySelector(`[data-hce-hunk="${hunk.id}"]`);
-    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    centerFrameOnHunk(frame, hunk.id);
   }
+
+  window.requestAnimationFrame(() => {
+    renderVisualMergeGutter();
+    updateDifferenceRail();
+  });
 }
 
 function navigateDifference(delta) {
   const hunks = currentHunks();
   if (hunks.length === 0) return;
   setActiveDifference(state.activeDifferenceIndex + delta, true);
+}
+
+function centerFrameOnHunk(frame, hunkId) {
+  const doc = frame.contentDocument;
+  const scroller = scrollingElement(frame);
+  if (!doc || !scroller) return;
+
+  const nodes = [...doc.querySelectorAll(`[data-hce-hunk="${hunkId}"]`)];
+  if (nodes.length === 0) return;
+
+  const tops = nodes.map((node) => node.getBoundingClientRect().top + scroller.scrollTop);
+  const bottoms = nodes.map((node) => node.getBoundingClientRect().bottom + scroller.scrollTop);
+  const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+
+  scroller.scrollTop = Math.max(
+    0,
+    Math.min(maxTop, center - scroller.clientHeight / 2)
+  );
 }
 
 function scrollingElement(frame) {
@@ -727,6 +895,7 @@ function syncVisualScrollFrom(side) {
 }
 
 function onVisualScroll(side) {
+  scheduleVisualMergeGutter();
   if (performance.now() < state.programmaticUntil[side]) return;
   if (!state.scrollDriver) setScrollDriver(side);
   if (state.scrollDriver !== side) return;
@@ -737,6 +906,7 @@ function onVisualScroll(side) {
   }, 240);
 
   window.requestAnimationFrame(() => syncVisualScrollFrom(side));
+  scheduleVisualMergeGutter();
 }
 
 function wireCompareFrame(side) {
@@ -770,6 +940,8 @@ function wireCompareFrame(side) {
     window.requestAnimationFrame(() => {
       rebuildAlignmentPoints();
       markActiveVisualHunk();
+      renderVisualMergeGutter();
+      updateDifferenceRail();
 
       if (state.pendingInitialDifferenceScroll && currentHunks().length > 0) {
         state.pendingInitialDifferenceScroll = false;
@@ -837,47 +1009,71 @@ function renderSourceCompare() {
     return;
   }
 
+  const hunkRowIndices = new Map();
+  analysis.rows.forEach((row, rowIndex) => {
+    if (!row.hunkId) return;
+    const indices = hunkRowIndices.get(row.hunkId) ?? [];
+    indices.push(rowIndex);
+    hunkRowIndices.set(row.hunkId, indices);
+  });
+
+  const hunkMiddleRows = new Map(
+    [...hunkRowIndices.entries()].map(([hunkId, indices]) => [
+      hunkId,
+      indices[Math.floor(indices.length / 2)]
+    ])
+  );
+
   const fragment = document.createDocumentFragment();
 
-  for (const row of analysis.rows) {
+  analysis.rows.forEach((row, rowIndex) => {
     const line = document.createElement('div');
     line.className = `source-row ${row.hunkId ? `hunk-${row.kind}` : ''}`;
+
+    let hunkIndex = -1;
     if (row.hunkId) {
       line.dataset.hunkId = row.hunkId;
+      hunkIndex = analysis.hunks.findIndex((hunk) => hunk.id === row.hunkId);
       line.addEventListener('click', () => {
-        const index = analysis.hunks.findIndex((hunk) => hunk.id === row.hunkId);
-        if (index >= 0) setActiveDifference(index, false);
+        if (hunkIndex >= 0) setActiveDifference(hunkIndex, false);
       });
     }
 
     const gutter = document.createElement('div');
     gutter.className = 'source-gutter';
 
-    if (row.hunkId && row.hunkFirstRow) {
+    if (row.hunkId && hunkMiddleRows.get(row.hunkId) === rowIndex) {
+      const pair = document.createElement('div');
+      pair.className = 'source-merge-pair';
+      pair.classList.toggle('active', hunkIndex === state.activeDifferenceIndex);
+
       const toLeft = document.createElement('button');
       toLeft.type = 'button';
       toLeft.textContent = '←';
-      toLeft.title = 'Copy this difference from right to left';
+      toLeft.title = `Copy difference ${hunkIndex + 1} from right to left`;
       toLeft.addEventListener('click', (event) => {
         event.stopPropagation();
+        setActiveDifference(hunkIndex, false);
         void mergeDifference('right-to-left', row.hunkId);
       });
 
       const toRight = document.createElement('button');
       toRight.type = 'button';
       toRight.textContent = '→';
-      toRight.title = 'Copy this difference from left to right';
+      toRight.title = `Copy difference ${hunkIndex + 1} from left to right`;
       toRight.addEventListener('click', (event) => {
         event.stopPropagation();
+        setActiveDifference(hunkIndex, false);
         void mergeDifference('left-to-right', row.hunkId);
       });
 
-      gutter.append(toLeft, toRight);
+      pair.append(toLeft, toRight);
+      gutter.append(pair);
     }
 
     line.append(sourceCell('left', row), gutter, sourceCell('right', row));
     fragment.append(line);
-  }
+  });
 
   elements.sourceCompare.append(fragment);
   setActiveDifference(state.activeDifferenceIndex, false);
@@ -918,6 +1114,10 @@ function applyCompareResult(result, options = {}) {
   if (result?.state) {
     state.compare.left = result.state.left;
     state.compare.right = result.state.right;
+  }
+
+  if (result?.history) {
+    state.compareHistory = result.history;
   }
 
   state.compareAnalysis = result?.analysis ?? null;
@@ -975,6 +1175,28 @@ async function saveCompare(side) {
   }
 }
 
+async function undoCompare() {
+  const result = await window.hce.undoCompare();
+  if (!result.ok) {
+    showToast(result.reason);
+    return;
+  }
+
+  applyCompareResult(result, { keepIndex: true });
+  showToast('Merge undone.');
+}
+
+async function redoCompare() {
+  const result = await window.hce.redoCompare();
+  if (!result.ok) {
+    showToast(result.reason);
+    return;
+  }
+
+  applyCompareResult(result, { keepIndex: true });
+  showToast('Merge redone.');
+}
+
 async function mergeDifference(direction, explicitHunkId = null) {
   const hunk = explicitHunkId
     ? currentHunks().find((candidate) => candidate.id === explicitHunkId)
@@ -1002,7 +1224,11 @@ function setCompareZoom(nextZoom) {
     applyCompareZoom(frame);
   }
 
-  window.requestAnimationFrame(rebuildAlignmentPoints);
+  window.requestAnimationFrame(() => {
+    rebuildAlignmentPoints();
+    renderVisualMergeGutter();
+    updateDifferenceRail();
+  });
 }
 
 function loadSession(session) {
@@ -1171,8 +1397,8 @@ elements.saveCompareRightButton.addEventListener('click', () => void saveCompare
 elements.swapCompareButton.addEventListener('click', () => void swapCompare());
 elements.previousDifferenceButton.addEventListener('click', () => navigateDifference(-1));
 elements.nextDifferenceButton.addEventListener('click', () => navigateDifference(1));
-elements.mergeRightToLeftButton.addEventListener('click', () => void mergeDifference('right-to-left'));
-elements.mergeLeftToRightButton.addEventListener('click', () => void mergeDifference('left-to-right'));
+elements.compareUndoButton.addEventListener('click', () => void undoCompare());
+elements.compareRedoButton.addEventListener('click', () => void redoCompare());
 elements.syncScrollCheckbox.addEventListener('change', () => {
   state.syncScroll = elements.syncScrollCheckbox.checked;
 });
@@ -1223,6 +1449,18 @@ document.addEventListener('keydown', (event) => {
   }
 
   if (state.workspaceMode === 'compare') {
+    if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      void undoCompare();
+      return;
+    }
+
+    if (modifier && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+      event.preventDefault();
+      void redoCompare();
+      return;
+    }
+
     if (modifier && event.key.toLowerCase() === 's') {
       event.preventDefault();
       const dirty = ['left', 'right'].filter((side) => state.compare[side]?.dirty);

@@ -19,6 +19,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
 let session = null;
 let compareSlots = { left: null, right: null };
+let compareUndoStack = [];
+let compareRedoStack = [];
 let allowClose = false;
 
 function baseHrefFor(filePath) {
@@ -88,6 +90,47 @@ function compareStatePayload() {
   };
 }
 
+function compareHistoryPayload() {
+  return {
+    canUndo: compareUndoStack.length > 0,
+    canRedo: compareRedoStack.length > 0,
+    undoCount: compareUndoStack.length,
+    redoCount: compareRedoStack.length
+  };
+}
+
+function resetCompareHistory() {
+  compareUndoStack = [];
+  compareRedoStack = [];
+}
+
+function compareSnapshot() {
+  return {
+    left: compareSlots.left?.working ?? null,
+    right: compareSlots.right?.working ?? null
+  };
+}
+
+function restoreCompareSnapshot(snapshot) {
+  if (compareSlots.left && typeof snapshot?.left === 'string') {
+    compareSlots.left.working = snapshot.left;
+    compareSlots.left.dirty = compareSlots.left.working !== compareSlots.left.original;
+  }
+
+  if (compareSlots.right && typeof snapshot?.right === 'string') {
+    compareSlots.right.working = snapshot.right;
+    compareSlots.right.dirty = compareSlots.right.working !== compareSlots.right.original;
+  }
+}
+
+function compareResultPayload() {
+  return {
+    state: compareStatePayload(),
+    analysis: compareAnalysisPayload(),
+    history: compareHistoryPayload()
+  };
+}
+
 function compareAnalysisPayload() {
   const left = compareSlots.left?.working;
   const right = compareSlots.right?.working;
@@ -104,6 +147,7 @@ async function readCompareFile(side, filePath) {
     working: source,
     dirty: false
   };
+  resetCompareHistory();
   return comparePayload(normalizedSide);
 }
 
@@ -303,8 +347,7 @@ ipcMain.handle('compare:open', async (_event, requestedSide) => {
     return {
       cancelled: false,
       page: await readCompareFile(side, result.filePaths[0]),
-      state: compareStatePayload(),
-      analysis: compareAnalysisPayload()
+      ...compareResultPayload()
     };
   } catch (error) {
     return {
@@ -326,8 +369,7 @@ ipcMain.handle('compare:reload', async (_event, requestedSide) => {
       missing: false,
       cancelled: false,
       page: comparePayload(side),
-      state: compareStatePayload(),
-      analysis: compareAnalysisPayload()
+      ...compareResultPayload()
     };
   } catch (error) {
     return {
@@ -340,16 +382,11 @@ ipcMain.handle('compare:reload', async (_event, requestedSide) => {
 
 ipcMain.handle('compare:swap', async () => {
   [compareSlots.left, compareSlots.right] = [compareSlots.right, compareSlots.left];
-  return {
-    state: compareStatePayload(),
-    analysis: compareAnalysisPayload()
-  };
+  resetCompareHistory();
+  return compareResultPayload();
 });
 
-ipcMain.handle('compare:get-state', async () => ({
-  state: compareStatePayload(),
-  analysis: compareAnalysisPayload()
-}));
+ipcMain.handle('compare:get-state', async () => compareResultPayload());
 
 ipcMain.handle('compare:analyze', async () => compareAnalysisPayload());
 
@@ -366,6 +403,9 @@ ipcMain.handle('compare:merge', async (_event, mode, hunkId, direction) => {
 
   if (!result.ok) return result;
 
+  compareUndoStack.push(compareSnapshot());
+  compareRedoStack = [];
+
   compareSlots.left.working = result.leftSource;
   compareSlots.right.working = result.rightSource;
   compareSlots.left.dirty = compareSlots.left.working !== compareSlots.left.original;
@@ -373,8 +413,37 @@ ipcMain.handle('compare:merge', async (_event, mode, hunkId, direction) => {
 
   return {
     ok: true,
-    state: compareStatePayload(),
-    analysis: compareAnalysisPayload()
+    ...compareResultPayload()
+  };
+});
+
+ipcMain.handle('compare:undo', async () => {
+  if (compareUndoStack.length === 0) {
+    return { ok: false, reason: 'Nothing to undo.', ...compareResultPayload() };
+  }
+
+  compareRedoStack.push(compareSnapshot());
+  const snapshot = compareUndoStack.pop();
+  restoreCompareSnapshot(snapshot);
+
+  return {
+    ok: true,
+    ...compareResultPayload()
+  };
+});
+
+ipcMain.handle('compare:redo', async () => {
+  if (compareRedoStack.length === 0) {
+    return { ok: false, reason: 'Nothing to redo.', ...compareResultPayload() };
+  }
+
+  compareUndoStack.push(compareSnapshot());
+  const snapshot = compareRedoStack.pop();
+  restoreCompareSnapshot(snapshot);
+
+  return {
+    ok: true,
+    ...compareResultPayload()
   };
 });
 
@@ -392,8 +461,7 @@ ipcMain.handle('compare:save', async (_event, requestedSide) => {
       ok: true,
       page: comparePayload(side),
       backupPath,
-      state: compareStatePayload(),
-      analysis: compareAnalysisPayload()
+      ...compareResultPayload()
     };
   } catch (error) {
     return {

@@ -1,6 +1,6 @@
 {
   "name": "html-content-editor",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Edit visible text in existing HTML files without rewriting their structure or styles.",
   "type": "module",
   "main": "src/main.mjs",
@@ -27,7 +27,9 @@
     },
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
     ],
     "win": {
       "target": [
@@ -53,5 +55,6 @@
     "portable": {
       "artifactName": "HTML-Content-Editor-Portable-${version}-${arch}.${ext}"
     }
-  }
+  },
+  "license": "MIT"
 }
