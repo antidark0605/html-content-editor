@@ -505,6 +505,21 @@ function activeHunk() {
 }
 
 function sourceHunkRailRatio(hunk) {
+  const renderedRows = [...elements.sourceCompare.querySelectorAll(`[data-hunk-id="${hunk.id}"]`)];
+  const scrollHeight = elements.sourceCompare.scrollHeight;
+
+  if (renderedRows.length > 0 && scrollHeight > 0) {
+    const containerRect = elements.sourceCompare.getBoundingClientRect();
+    const tops = renderedRows.map(
+      (row) => row.getBoundingClientRect().top - containerRect.top + elements.sourceCompare.scrollTop
+    );
+    const bottoms = renderedRows.map(
+      (row) => row.getBoundingClientRect().bottom - containerRect.top + elements.sourceCompare.scrollTop
+    );
+    const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+    return Math.min(1, Math.max(0, center / scrollHeight));
+  }
+
   const rows = state.compareAnalysis?.source?.rows ?? [];
   if (rows.length <= 1) return 0.5;
 
