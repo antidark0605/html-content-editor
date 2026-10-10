@@ -52,6 +52,10 @@ try {
   assert.ok(activeLeft > 0);
   assert.ok(activeRight > 0);
 
+  const visualMergePairs = page.locator('#visualMergeGutter .visual-merge-pair');
+  assert.ok(await visualMergePairs.count() > 0, 'Expected merge arrows beside visible differences');
+  assert.ok(await visualMergePairs.first().locator('button').count() === 2);
+
   await page.screenshot({
     path: path.join(outputDir, 'compare-visual.png'),
     fullPage: true
@@ -80,27 +84,73 @@ try {
   const sourceRows = await page.locator('#sourceCompare .source-row[data-hunk-id]').count();
   assert.ok(sourceRows > 0);
 
-  const mergeButtons = await page.locator('#sourceCompare .source-gutter button').count();
-  assert.ok(mergeButtons >= 2);
+  const sourceMergePairs = page.locator('#sourceCompare .source-merge-pair');
+  const pairCount = await sourceMergePairs.count();
+  assert.ok(pairCount >= 2, 'Expected multiple diff-local merge controls in Source view');
+
+  const railValidation = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#sourceCompare .source-row')];
+    const hunkIds = [];
+    for (const row of rows) {
+      const id = row.dataset.hunkId;
+      if (id && !hunkIds.includes(id)) hunkIds.push(id);
+    }
+
+    const markers = [...document.querySelectorAll('#differenceRail button')];
+    return hunkIds.map((id, index) => {
+      const indices = rows
+        .map((row, rowIndex) => row.dataset.hunkId === id ? rowIndex : -1)
+        .filter((rowIndex) => rowIndex >= 0);
+      const expected = rows.length <= 1
+        ? 50
+        : ((indices[0] + indices.at(-1)) / 2) / (rows.length - 1) * 100;
+      const actual = Number.parseFloat(markers[index]?.style.top ?? 'NaN');
+      return { expected, actual };
+    });
+  });
+
+  for (const { expected, actual } of railValidation) {
+    assert.ok(Number.isFinite(actual));
+    assert.ok(
+      Math.abs(actual - expected) < 3,
+      `Difference rail marker is not tied to the actual diff location: expected ${expected}, got ${actual}`
+    );
+  }
 
   await page.screenshot({
     path: path.join(outputDir, 'compare-source.png'),
     fullPage: true
   });
 
-  const beforeMergeCount = await page.locator('#differenceCount').textContent();
-  const firstRightArrow = page.locator('#sourceCompare .source-gutter button').filter({ hasText: '→' }).first();
-  await firstRightArrow.click();
+  const initialSource = await fs.readFile(right, 'utf8');
 
-  await page.waitForFunction(() => !document.querySelector('#compareRightDirty')?.classList.contains('hidden'));
-  assert.equal(await page.locator('#saveCompareRightButton').isEnabled(), true);
+  for (let mergeIndex = 0; mergeIndex < 2; mergeIndex += 1) {
+    const rightArrow = page.locator('#sourceCompare .source-merge-pair button').filter({ hasText: '→' }).first();
+    await rightArrow.click();
+    await page.waitForTimeout(150);
+  }
 
-  const afterMergeCount = await page.locator('#differenceCount').textContent();
-  assert.notEqual(afterMergeCount, beforeMergeCount);
+  await page.waitForFunction(() => {
+    const button = document.querySelector('#compareUndoButton');
+    return /Undo \(2\)/.test(button?.textContent ?? '');
+  });
+  assert.equal(await page.locator('#compareUndoButton').isEnabled(), true);
+  assert.equal(await page.locator('#compareRedoButton').isEnabled(), false);
+
+  await page.locator('#compareUndoButton').click();
+  await page.locator('#compareUndoButton').click();
+
+  await page.waitForFunction(() => document.querySelector('#compareUndoButton')?.disabled === true);
+  assert.match(await page.locator('#compareRedoButton').textContent() ?? '', /Redo \(2\)/);
+
+  await page.locator('#compareRedoButton').click();
+  await page.waitForFunction(() => /Undo \(1\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? ''));
 
   await page.locator('#saveCompareRightButton').click();
   await page.waitForFunction(() => document.querySelector('#compareRightDirty')?.classList.contains('hidden'));
-  assert.equal(await page.locator('#saveCompareRightButton').isEnabled(), false);
+
+  const savedSource = await fs.readFile(right, 'utf8');
+  assert.notEqual(savedSource, initialSource, 'Expected redo result to be saved to the right file');
 } finally {
   await electronApp.close();
   await fs.rm(tempDir, { recursive: true, force: true });
