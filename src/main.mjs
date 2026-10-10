@@ -8,6 +8,11 @@ import {
   applyTextEdits,
   extractEditableTextNodes
 } from './html-model.mjs';
+import {
+  buildCompareAnalysis,
+  mergeSourceHunk,
+  mergeVisibleTextHunk
+} from './compare-model.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -68,16 +73,37 @@ function comparePayload(side) {
     side: normalizedSide,
     filePath: slot.filePath,
     fileName: path.basename(slot.filePath),
-    source: slot.source,
+    source: slot.working,
+    originalSource: slot.original,
     baseHref: baseHrefFor(slot.filePath),
-    hasScripts: /<script\b/i.test(slot.source)
+    dirty: slot.dirty,
+    hasScripts: /<script\b/i.test(slot.working)
   };
+}
+
+function compareStatePayload() {
+  return {
+    left: comparePayload('left'),
+    right: comparePayload('right')
+  };
+}
+
+function compareAnalysisPayload() {
+  const left = compareSlots.left?.working;
+  const right = compareSlots.right?.working;
+  if (typeof left !== 'string' || typeof right !== 'string') return null;
+  return buildCompareAnalysis(left, right);
 }
 
 async function readCompareFile(side, filePath) {
   const normalizedSide = normalizeCompareSide(side);
   const source = await fsp.readFile(filePath, 'utf8');
-  compareSlots[normalizedSide] = { filePath, source };
+  compareSlots[normalizedSide] = {
+    filePath,
+    original: source,
+    working: source,
+    dirty: false
+  };
   return comparePayload(normalizedSide);
 }
 
@@ -114,7 +140,7 @@ function saveWithBackupSync(filePath, source) {
   fs.writeFileSync(filePath, source, 'utf8');
 }
 
-function confirmDiscardOrSave() {
+function confirmEditorDiscardOrSave() {
   if (!session?.dirty) return true;
 
   const choice = dialog.showMessageBoxSync(mainWindow, {
@@ -142,12 +168,64 @@ function confirmDiscardOrSave() {
   return true;
 }
 
+function confirmCompareDiscardOrSave(side) {
+  const normalizedSide = normalizeCompareSide(side);
+  const slot = compareSlots[normalizedSide];
+  if (!slot?.dirty) return true;
+
+  const choice = dialog.showMessageBoxSync(mainWindow, {
+    type: 'warning',
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'Unsaved comparison changes',
+    message: `Save changes to ${path.basename(slot.filePath)}?`,
+    detail: `The ${normalizedSide} comparison file has merged changes that are not saved.`
+  });
+
+  if (choice === 2) return false;
+
+  if (choice === 0) {
+    try {
+      saveWithBackupSync(slot.filePath, slot.working);
+      slot.original = slot.working;
+      slot.dirty = false;
+    } catch (error) {
+      dialog.showErrorBox('Save failed', error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function confirmAllUnsaved() {
+  if (!confirmEditorDiscardOrSave()) return false;
+  if (!confirmCompareDiscardOrSave('left')) return false;
+  if (!confirmCompareDiscardOrSave('right')) return false;
+  return true;
+}
+
+function startupArg(name) {
+  const prefix = `--${name}=`;
+  const arg = process.argv.find((value) => value.startsWith(prefix));
+  return arg ? arg.slice(prefix.length) : null;
+}
+
+async function loadStartupCompareFiles() {
+  const left = startupArg('compare-left');
+  const right = startupArg('compare-right');
+
+  if (left && fs.existsSync(left)) await readCompareFile('left', left);
+  if (right && fs.existsSync(right)) await readCompareFile('right', right);
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 850,
-    minWidth: 900,
-    minHeight: 620,
+    width: 1400,
+    height: 900,
+    minWidth: 960,
+    minHeight: 650,
     title: 'HTML Content Editor',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -167,7 +245,7 @@ async function createWindow() {
   mainWindow.on('close', (event) => {
     if (allowClose) return;
 
-    if (!confirmDiscardOrSave()) {
+    if (!confirmAllUnsaved()) {
       event.preventDefault();
       return;
     }
@@ -179,7 +257,7 @@ async function createWindow() {
 }
 
 ipcMain.handle('file:open', async () => {
-  if (!confirmDiscardOrSave()) return { cancelled: true };
+  if (!confirmEditorDiscardOrSave()) return { cancelled: true };
 
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Open HTML file',
@@ -206,6 +284,8 @@ ipcMain.handle('file:open', async () => {
 
 ipcMain.handle('compare:open', async (_event, requestedSide) => {
   const side = normalizeCompareSide(requestedSide);
+  if (!confirmCompareDiscardOrSave(side)) return { cancelled: true };
+
   const result = await dialog.showOpenDialog(mainWindow, {
     title: side === 'left' ? 'Open left HTML file' : 'Open right HTML file',
     properties: ['openFile'],
@@ -222,7 +302,9 @@ ipcMain.handle('compare:open', async (_event, requestedSide) => {
   try {
     return {
       cancelled: false,
-      page: await readCompareFile(side, result.filePaths[0])
+      page: await readCompareFile(side, result.filePaths[0]),
+      state: compareStatePayload(),
+      analysis: compareAnalysisPayload()
     };
   } catch (error) {
     return {
@@ -236,15 +318,21 @@ ipcMain.handle('compare:reload', async (_event, requestedSide) => {
   const side = normalizeCompareSide(requestedSide);
   const slot = compareSlots[side];
   if (!slot) return { missing: true };
+  if (!confirmCompareDiscardOrSave(side)) return { cancelled: true };
 
   try {
+    await readCompareFile(side, slot.filePath);
     return {
       missing: false,
-      page: await readCompareFile(side, slot.filePath)
+      cancelled: false,
+      page: comparePayload(side),
+      state: compareStatePayload(),
+      analysis: compareAnalysisPayload()
     };
   } catch (error) {
     return {
       missing: false,
+      cancelled: false,
       error: error instanceof Error ? error.message : String(error)
     };
   }
@@ -253,9 +341,66 @@ ipcMain.handle('compare:reload', async (_event, requestedSide) => {
 ipcMain.handle('compare:swap', async () => {
   [compareSlots.left, compareSlots.right] = [compareSlots.right, compareSlots.left];
   return {
-    left: comparePayload('left'),
-    right: comparePayload('right')
+    state: compareStatePayload(),
+    analysis: compareAnalysisPayload()
   };
+});
+
+ipcMain.handle('compare:get-state', async () => ({
+  state: compareStatePayload(),
+  analysis: compareAnalysisPayload()
+}));
+
+ipcMain.handle('compare:analyze', async () => compareAnalysisPayload());
+
+ipcMain.handle('compare:merge', async (_event, mode, hunkId, direction) => {
+  if (!compareSlots.left || !compareSlots.right) {
+    return { ok: false, reason: 'Open both comparison files first.' };
+  }
+
+  const leftSource = compareSlots.left.working;
+  const rightSource = compareSlots.right.working;
+  const result = mode === 'source'
+    ? mergeSourceHunk(leftSource, rightSource, hunkId, direction)
+    : mergeVisibleTextHunk(leftSource, rightSource, hunkId, direction);
+
+  if (!result.ok) return result;
+
+  compareSlots.left.working = result.leftSource;
+  compareSlots.right.working = result.rightSource;
+  compareSlots.left.dirty = compareSlots.left.working !== compareSlots.left.original;
+  compareSlots.right.dirty = compareSlots.right.working !== compareSlots.right.original;
+
+  return {
+    ok: true,
+    state: compareStatePayload(),
+    analysis: compareAnalysisPayload()
+  };
+});
+
+ipcMain.handle('compare:save', async (_event, requestedSide) => {
+  const side = normalizeCompareSide(requestedSide);
+  const slot = compareSlots[side];
+  if (!slot) return { ok: false, reason: 'No comparison file is open on this side.' };
+  if (!slot.dirty) return { ok: true, page: comparePayload(side), backupPath: null };
+
+  try {
+    const backupPath = await saveWithBackup(slot.filePath, slot.working, true);
+    slot.original = slot.working;
+    slot.dirty = false;
+    return {
+      ok: true,
+      page: comparePayload(side),
+      backupPath,
+      state: compareStatePayload(),
+      analysis: compareAnalysisPayload()
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
 });
 
 ipcMain.handle('html:apply-edits', async (_event, edits) => {
@@ -321,6 +466,7 @@ ipcMain.handle('html:diff', async (_event, workingSource) => {
 ipcMain.handle('app:get-session', async () => sessionPayload());
 
 app.whenReady().then(async () => {
+  await loadStartupCompareFiles();
   await createWindow();
 
   app.on('activate', async () => {
@@ -332,7 +478,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
-  if (mainWindow && !allowClose && !confirmDiscardOrSave()) {
+  if (mainWindow && !allowClose && !confirmAllUnsaved()) {
     return;
   }
   allowClose = true;

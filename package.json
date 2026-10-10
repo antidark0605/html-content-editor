@@ -1,17 +1,19 @@
 {
   "name": "html-content-editor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Edit visible text in existing HTML files without rewriting their structure or styles.",
   "type": "module",
   "main": "src/main.mjs",
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "build:win": "electron-builder --win nsis portable --x64 --publish never"
+    "build:win": "electron-builder --win nsis portable --x64 --publish never",
+    "test:ui": "node tests/ui-smoke.mjs"
   },
   "devDependencies": {
     "electron": "44.3.0",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "playwright": "^1.55.0"
   },
   "dependencies": {
     "diff": "9.0.0",

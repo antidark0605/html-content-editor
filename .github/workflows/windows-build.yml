@@ -17,6 +17,9 @@ jobs:
   build:
     runs-on: windows-latest
 
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -29,8 +32,19 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Run tests
+      - name: Run unit tests
         run: npm test
+
+      - name: Run Electron UI validation
+        run: npm run test:ui
+
+      - name: Upload UI validation screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HTML-Content-Editor-UI-Validation
+          path: test-results/*.png
+          if-no-files-found: ignore
 
       - name: Build Windows executables
         run: npm run build:win

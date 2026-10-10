@@ -21,13 +21,13 @@
   </header>
 
   <div class="toolbar">
-    <div class="workspace-tabs" role="tablist" aria-label="Workspace">
+    <div class="workspace-tabs segmented" role="tablist" aria-label="Workspace">
       <button class="active" data-workspace-mode="editor" role="tab">Editor</button>
       <button data-workspace-mode="compare" role="tab">Compare</button>
     </div>
 
     <div id="editorTools" class="editor-tools">
-      <div class="mode-tabs" role="tablist" aria-label="Editor mode">
+      <div class="mode-tabs segmented" role="tablist" aria-label="Editor mode">
         <button class="mode active" data-mode="edit" role="tab">Edit</button>
         <button class="mode" data-mode="preview" role="tab">Preview</button>
         <button class="mode" data-mode="diff" role="tab">Diff</button>
@@ -46,12 +46,30 @@
     </div>
 
     <div id="compareTools" class="compare-tools hidden">
-      <label class="sync-toggle">
+      <div class="compare-view-tabs segmented" role="tablist" aria-label="Comparison view">
+        <button class="active" data-compare-view="visual">Visual</button>
+        <button data-compare-view="source">Source</button>
+      </div>
+
+      <div class="difference-nav">
+        <button id="previousDifferenceButton" title="Previous difference" disabled>↑</button>
+        <span id="differenceCount">0 differences</span>
+        <button id="nextDifferenceButton" title="Next difference" disabled>↓</button>
+      </div>
+
+      <div class="merge-actions">
+        <button id="mergeRightToLeftButton" title="Copy selected difference from right to left" disabled>←</button>
+        <button id="mergeLeftToRightButton" title="Copy selected difference from left to right" disabled>→</button>
+      </div>
+
+      <label id="syncScrollLabel" class="sync-toggle">
         <input id="syncScrollCheckbox" type="checkbox" checked>
-        Sync scroll
+        Sync
       </label>
+
       <button id="swapCompareButton" title="Swap left and right pages">Swap</button>
-      <div class="zoom-controls" aria-label="Compare zoom">
+
+      <div id="zoomControls" class="zoom-controls" aria-label="Compare zoom">
         <button id="zoomOutButton" title="Zoom out">−</button>
         <button id="zoomResetButton" title="Reset zoom"><span id="zoomLabel">100%</span></button>
         <button id="zoomInButton" title="Zoom in">+</button>
@@ -63,13 +81,13 @@
     <section id="welcome" class="welcome">
       <div class="welcome-card">
         <h1>Edit HTML text without wrestling with tags.</h1>
-        <p>Open an existing <code>.html</code> file, click highlighted text, edit it, preview the real page, review the diff, then save.</p>
+        <p>Open an existing <code>.html</code> file, click highlighted text, edit it, preview the page, review the diff, then save.</p>
         <button id="welcomeOpenButton" class="primary large">Open an HTML file</button>
         <ul>
           <li>Styles and HTML tags are not rewritten when saving text edits.</li>
           <li>A backup is created automatically before the first overwrite.</li>
-          <li>Use Compare to open two HTML files side by side.</li>
-          <li>Page JavaScript is disabled in Edit, Preview, and Compare for safety.</li>
+          <li>Compare can highlight two HTML files visually or line-by-line.</li>
+          <li>Page JavaScript is disabled in Edit, Preview, and Visual Compare for safety.</li>
         </ul>
       </div>
     </section>
@@ -87,58 +105,51 @@
       </div>
 
       <div id="frameHost" class="frame-host">
-        <iframe
-          id="pageFrame"
-          title="HTML page editor"
-          sandbox="allow-same-origin"
-        ></iframe>
+        <iframe id="pageFrame" title="HTML page editor" sandbox="allow-same-origin"></iframe>
       </div>
 
       <div id="diffPanel" class="diff-panel hidden" aria-live="polite"></div>
     </section>
 
     <section id="compareWorkspace" class="compare-workspace hidden">
-      <div class="compare-grid">
-        <article class="compare-pane">
-          <div class="compare-pane-header">
-            <div class="compare-file-meta">
-              <strong>Left</strong>
-              <span id="compareLeftName" class="compare-file-name">No file open</span>
-              <span id="compareLeftScriptWarning" class="warning hidden">Scripts disabled</span>
-            </div>
-            <div class="compare-pane-actions">
-              <button id="openCompareLeftButton" class="primary">Open Left</button>
-              <button id="reloadCompareLeftButton" disabled>Reload</button>
-            </div>
+      <div class="compare-filebar">
+        <div class="compare-file-side">
+          <div class="compare-file-meta">
+            <strong>Left</strong>
+            <span id="compareLeftName" class="compare-file-name">No file open</span>
+            <span id="compareLeftDirty" class="dirty-badge hidden">Unsaved</span>
+            <span id="compareLeftScriptWarning" class="warning hidden">Scripts disabled</span>
           </div>
-          <iframe
-            id="compareLeftFrame"
-            class="compare-frame"
-            title="Left HTML comparison page"
-            sandbox="allow-same-origin"
-          ></iframe>
-        </article>
+          <div class="compare-pane-actions">
+            <button id="openCompareLeftButton" class="primary">Open</button>
+            <button id="reloadCompareLeftButton" disabled>Reload</button>
+            <button id="saveCompareLeftButton" disabled>Save</button>
+          </div>
+        </div>
 
-        <article class="compare-pane">
-          <div class="compare-pane-header">
-            <div class="compare-file-meta">
-              <strong>Right</strong>
-              <span id="compareRightName" class="compare-file-name">No file open</span>
-              <span id="compareRightScriptWarning" class="warning hidden">Scripts disabled</span>
-            </div>
-            <div class="compare-pane-actions">
-              <button id="openCompareRightButton" class="primary">Open Right</button>
-              <button id="reloadCompareRightButton" disabled>Reload</button>
-            </div>
+        <div class="compare-file-side right">
+          <div class="compare-file-meta">
+            <strong>Right</strong>
+            <span id="compareRightName" class="compare-file-name">No file open</span>
+            <span id="compareRightDirty" class="dirty-badge hidden">Unsaved</span>
+            <span id="compareRightScriptWarning" class="warning hidden">Scripts disabled</span>
           </div>
-          <iframe
-            id="compareRightFrame"
-            class="compare-frame"
-            title="Right HTML comparison page"
-            sandbox="allow-same-origin"
-          ></iframe>
-        </article>
+          <div class="compare-pane-actions">
+            <button id="openCompareRightButton" class="primary">Open</button>
+            <button id="reloadCompareRightButton" disabled>Reload</button>
+            <button id="saveCompareRightButton" disabled>Save</button>
+          </div>
+        </div>
       </div>
+
+      <div id="visualCompare" class="visual-compare">
+        <iframe id="compareLeftFrame" class="compare-frame" title="Left HTML comparison page" sandbox="allow-same-origin"></iframe>
+        <div class="visual-divider" aria-hidden="true"></div>
+        <iframe id="compareRightFrame" class="compare-frame" title="Right HTML comparison page" sandbox="allow-same-origin"></iframe>
+      </div>
+
+      <div id="sourceCompare" class="source-compare hidden" aria-label="Source comparison"></div>
+      <div id="differenceRail" class="difference-rail" aria-label="Difference overview"></div>
     </section>
   </main>
 

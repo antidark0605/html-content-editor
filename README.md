@@ -20,7 +20,11 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 - Save / Save As
 - Create a one-time `*.hce-backup.html` before the first overwrite
 - Side-by-side Compare workspace for two HTML files
-- Optional proportional sync scrolling, Swap, Reload, and shared Zoom in Compare
+- Visual Compare highlights changed visible text, including word-level changes
+- Source Compare aligns lines, highlights inline changes, and provides per-hunk left/right merge arrows
+- Previous/next difference navigation plus a difference overview rail
+- Content-anchor synchronized scrolling in Visual Compare to keep related sections aligned without feedback bounce
+- Swap, Reload, Save per side, and shared Zoom in Visual Compare
 - Windows installer and portable executable built by GitHub Actions
 
 ## Safety model
@@ -33,18 +37,32 @@ Windows builds are currently unsigned, so Microsoft SmartScreen may warn when la
 
 ## Compare two pages
 
-Switch to **Compare**, then open a left and right HTML file. Each side is rendered independently with local relative CSS/images resolved from that file's directory.
+Switch to **Compare**, then open a left and right HTML file.
 
-Compare includes:
+### Visual
 
-- Open / Reload on each side
-- Swap left and right
-- Proportional **Sync scroll** for normal page scrolling
-- Shared zoom from 50% to 200%
-- File names and full paths on hover
-- JavaScript disabled on both sides
+Visual Compare renders both pages and compares their visible text. Changed blocks are highlighted, with stronger word-level highlighting inside changed text. Previous/next difference controls jump between change blocks.
 
-Sync scroll follows each page's overall scroll percentage, so pages with different section heights stay roughly aligned. Nested custom scroll containers are not synchronized yet.
+Visual merge copies text only when the two change blocks have compatible text-node structure, so the target page keeps its existing tags, classes, and formatting. Structural insertions/deletions should be merged in Source view.
+
+**Sync** uses matching text anchors from the diff to align related content rather than simply copying scrollbar percentages. Programmatic scrolling on the follower pane is suppressed from feeding back into the leader pane, avoiding the old oscillation/back-jump behavior.
+
+### Source
+
+Source Compare provides an Araxis/WinMerge/Meld-style aligned text view:
+
+- line numbers on both sides
+- changed lines highlighted
+- changed words highlighted inside lines
+- blank alignment rows where one side has extra lines
+- per-change **← / →** merge buttons
+- previous / next difference navigation
+- overview rail showing all differences
+- Save button and unsaved indicator for each side
+
+Source merge copies the selected source hunk exactly, so it can also handle HTML structure, attributes, CSS, and inserted/deleted lines.
+
+JavaScript remains disabled in Visual Compare. Relative CSS/images are resolved from each HTML file's own directory.
 
 ## Current limitations
 
@@ -72,9 +90,19 @@ npm start
 
 ## Test
 
+Unit tests:
+
 ```bash
 npm test
 ```
+
+Real Electron UI validation:
+
+```bash
+npm run test:ui
+```
+
+The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test opens two real HTML fixtures, checks visual diff highlighting, exercises synchronized scrolling and verifies it stays stable, switches to Source Compare, performs a merge, and saves the changed side. CI also keeps validation screenshots as an artifact.
 
 ## Build for Windows
 
