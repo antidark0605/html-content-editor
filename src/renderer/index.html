@@ -57,9 +57,9 @@
         <button id="nextDifferenceButton" title="Next difference" disabled>↓</button>
       </div>
 
-      <div class="merge-actions">
-        <button id="mergeRightToLeftButton" title="Copy selected difference from right to left" disabled>←</button>
-        <button id="mergeLeftToRightButton" title="Copy selected difference from left to right" disabled>→</button>
+      <div class="compare-history-actions">
+        <button id="compareUndoButton" title="Undo last merge (Ctrl+Z)" disabled>Undo</button>
+        <button id="compareRedoButton" title="Redo merge (Ctrl+Y)" disabled>Redo</button>
       </div>
 
       <label id="syncScrollLabel" class="sync-toggle">
@@ -144,7 +144,7 @@
 
       <div id="visualCompare" class="visual-compare">
         <iframe id="compareLeftFrame" class="compare-frame" title="Left HTML comparison page" sandbox="allow-same-origin"></iframe>
-        <div class="visual-divider" aria-hidden="true"></div>
+        <div id="visualMergeGutter" class="visual-divider" aria-label="Merge controls for visible differences"></div>
         <iframe id="compareRightFrame" class="compare-frame" title="Right HTML comparison page" sandbox="allow-same-origin"></iframe>
       </div>
 
