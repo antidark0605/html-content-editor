@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('hce', {
   getCompareState: () => ipcRenderer.invoke('compare:get-state'),
   analyzeCompare: () => ipcRenderer.invoke('compare:analyze'),
   mergeCompare: (mode, hunkId, direction) => ipcRenderer.invoke('compare:merge', mode, hunkId, direction),
+  undoCompare: () => ipcRenderer.invoke('compare:undo'),
+  redoCompare: () => ipcRenderer.invoke('compare:redo'),
   saveCompare: (side) => ipcRenderer.invoke('compare:save', side),
   applyEdits: (edits) => ipcRenderer.invoke('html:apply-edits', edits),
   save: (workingSource) => ipcRenderer.invoke('file:save', workingSource),
