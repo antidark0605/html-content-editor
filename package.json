@@ -27,7 +27,9 @@
     },
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
     ],
     "win": {
       "target": [
@@ -53,5 +55,6 @@
     "portable": {
       "artifactName": "HTML-Content-Editor-Portable-${version}-${arch}.${ext}"
     }
-  }
+  },
+  "license": "MIT"
 }
