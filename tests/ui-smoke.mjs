@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { _electron as electron } from 'playwright';
 
@@ -7,8 +8,11 @@ const root = process.cwd();
 const outputDir = path.join(root, 'test-results');
 await fs.mkdir(outputDir, { recursive: true });
 
-const left = path.join(root, 'samples', 'compare-left.html');
-const right = path.join(root, 'samples', 'compare-right.html');
+const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hce-ui-'));
+const left = path.join(tempDir, 'compare-left.html');
+const right = path.join(tempDir, 'compare-right.html');
+await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), left);
+await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), right);
 
 const electronApp = await electron.launch({
   args: [
@@ -41,6 +45,12 @@ try {
   const rightHunks = await rightFrame.locator('[data-hce-hunk]').count();
   assert.ok(leftHunks > 0);
   assert.ok(rightHunks > 0);
+
+  await page.waitForTimeout(350);
+  const activeLeft = await leftFrame.locator('.hce-active-diff').count();
+  const activeRight = await rightFrame.locator('.hce-active-diff').count();
+  assert.ok(activeLeft > 0);
+  assert.ok(activeRight > 0);
 
   await page.screenshot({
     path: path.join(outputDir, 'compare-visual.png'),
@@ -77,6 +87,21 @@ try {
     path: path.join(outputDir, 'compare-source.png'),
     fullPage: true
   });
+
+  const beforeMergeCount = await page.locator('#differenceCount').textContent();
+  const firstRightArrow = page.locator('#sourceCompare .source-gutter button').filter({ hasText: '→' }).first();
+  await firstRightArrow.click();
+
+  await page.waitForFunction(() => !document.querySelector('#compareRightDirty')?.classList.contains('hidden'));
+  assert.equal(await page.locator('#saveCompareRightButton').isEnabled(), true);
+
+  const afterMergeCount = await page.locator('#differenceCount').textContent();
+  assert.notEqual(afterMergeCount, beforeMergeCount);
+
+  await page.locator('#saveCompareRightButton').click();
+  await page.waitForFunction(() => document.querySelector('#compareRightDirty')?.classList.contains('hidden'));
+  assert.equal(await page.locator('#saveCompareRightButton').isEnabled(), false);
 } finally {
   await electronApp.close();
+  await fs.rm(tempDir, { recursive: true, force: true });
 }
