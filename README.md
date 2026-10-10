@@ -22,7 +22,9 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 - Side-by-side Compare workspace for two HTML files
 - Visual Compare highlights changed visible text, including word-level changes
 - Source Compare aligns lines, highlights inline changes, and provides per-hunk left/right merge arrows
-- Previous/next difference navigation plus a difference overview rail
+- Previous/next difference navigation plus a difference overview rail positioned from the actual diff locations
+- Araxis-style ← / → merge controls shown beside each visible/source diff block instead of relying on a toolbar-level merge action
+- Multi-level Compare Undo/Redo for merge operations, including Ctrl+Z / Ctrl+Y and visible history depth
 - Content-anchor synchronized scrolling in Visual Compare to keep related sections aligned without feedback bounce
 - Swap, Reload, Save per side, and shared Zoom in Visual Compare
 - Windows installer and portable executable built by GitHub Actions
@@ -43,7 +45,7 @@ Switch to **Compare**, then open a left and right HTML file.
 
 Visual Compare renders both pages and compares their visible text. Changed blocks are highlighted, with stronger word-level highlighting inside changed text. Previous/next difference controls jump between change blocks.
 
-Visual merge copies text only when the two change blocks have compatible text-node structure, so the target page keeps its existing tags, classes, and formatting. Structural insertions/deletions should be merged in Source view.
+Visual merge copies text only when the two change blocks have compatible text-node structure, so the target page keeps its existing tags, classes, and formatting. Each mergeable difference gets its own ← / → controls in the center gutter. Structural insertions/deletions show disabled visual arrows and should be merged in Source view.
 
 **Sync** uses matching text anchors from the diff to align related content rather than simply copying scrollbar percentages. Programmatic scrolling on the follower pane is suppressed from feeding back into the leader pane, avoiding the old oscillation/back-jump behavior.
 
@@ -55,9 +57,10 @@ Source Compare provides an Araxis/WinMerge/Meld-style aligned text view:
 - changed lines highlighted
 - changed words highlighted inside lines
 - blank alignment rows where one side has extra lines
-- per-change **← / →** merge buttons
+- per-change **← / →** merge buttons positioned in the center gutter at the actual diff block
+- multi-level merge **Undo / Redo**
 - previous / next difference navigation
-- overview rail showing all differences
+- overview rail whose marker position reflects each diff's real document position
 - Save button and unsaved indicator for each side
 
 Source merge copies the selected source hunk exactly, so it can also handle HTML structure, attributes, CSS, and inserted/deleted lines.
@@ -102,7 +105,7 @@ Real Electron UI validation:
 npm run test:ui
 ```
 
-The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test opens two real HTML fixtures, checks visual diff highlighting, exercises synchronized scrolling and verifies it stays stable, switches to Source Compare, performs a merge, and saves the changed side. CI also keeps validation screenshots as an artifact.
+The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test opens two real HTML fixtures, checks visual diff highlighting and diff-local merge arrows, exercises synchronized scrolling and verifies it stays stable, verifies source rail markers are tied to the real diff rows, performs multiple merges, checks multi-level Undo/Redo, and saves the changed side. CI also keeps validation screenshots as an artifact.
 
 ## Build for Windows
 
