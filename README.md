@@ -122,4 +122,6 @@ Download them from the **Windows Build** workflow artifact named `HTML-Content-E
 
 ## License
 
-No open-source license has been selected yet. Public source code is visible, but reuse rights are not granted until a license is added.
+HTML Content Editor is released under the [MIT License](./LICENSE).
+
+The application also uses third-party open-source components under their own licenses. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md). Binary distributions include Electron/Chromium components and their upstream notices.
