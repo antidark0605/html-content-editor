@@ -642,47 +642,47 @@ function renderVisualMergeGutter() {
   if (state.compareView !== 'visual') return;
 
   elements.visualMergeGutter.replaceChildren();
+
   const hunks = state.compareAnalysis?.visual?.hunks ?? [];
+  if (hunks.length === 0) return;
+
+  const index = Math.min(Math.max(state.activeDifferenceIndex, 0), hunks.length - 1);
+  const hunk = hunks[index];
   const height = elements.visualMergeGutter.clientHeight;
+  const y = visualHunkCenterInGutter(hunk);
 
-  hunks.forEach((hunk, index) => {
-    const y = visualHunkCenterInGutter(hunk);
-    if (!Number.isFinite(y) || y < -24 || y > height + 24) return;
+  if (!Number.isFinite(y) || height <= 0 || y < -24 || y > height + 24) return;
 
-    const group = document.createElement('div');
-    group.className = 'visual-merge-pair';
-    group.style.top = `${Math.max(18, Math.min(height - 18, y))}px`;
-    group.classList.toggle('active', index === state.activeDifferenceIndex);
+  const group = document.createElement('div');
+  group.className = 'visual-merge-pair active';
+  group.style.top = `${Math.max(18, Math.min(height - 18, y))}px`;
 
-    const toLeft = document.createElement('button');
-    toLeft.type = 'button';
-    toLeft.textContent = '←';
-    toLeft.title = hunk.mergeableText
-      ? `Copy difference ${index + 1} from right to left`
-      : 'Structural difference: use Source view to merge';
-    toLeft.disabled = !hunk.mergeableText;
-    toLeft.addEventListener('click', (event) => {
-      event.stopPropagation();
-      setActiveDifference(index, false);
-      void mergeDifference('right-to-left', hunk.id);
-    });
-
-    const toRight = document.createElement('button');
-    toRight.type = 'button';
-    toRight.textContent = '→';
-    toRight.title = hunk.mergeableText
-      ? `Copy difference ${index + 1} from left to right`
-      : 'Structural difference: use Source view to merge';
-    toRight.disabled = !hunk.mergeableText;
-    toRight.addEventListener('click', (event) => {
-      event.stopPropagation();
-      setActiveDifference(index, false);
-      void mergeDifference('left-to-right', hunk.id);
-    });
-
-    group.append(toLeft, toRight);
-    elements.visualMergeGutter.append(group);
+  const toLeft = document.createElement('button');
+  toLeft.type = 'button';
+  toLeft.textContent = '←';
+  toLeft.title = hunk.mergeableText
+    ? `Copy difference ${index + 1} from right to left`
+    : 'Structural difference: use Source view to merge';
+  toLeft.disabled = !hunk.mergeableText;
+  toLeft.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void mergeDifference('right-to-left', hunk.id);
   });
+
+  const toRight = document.createElement('button');
+  toRight.type = 'button';
+  toRight.textContent = '→';
+  toRight.title = hunk.mergeableText
+    ? `Copy difference ${index + 1} from left to right`
+    : 'Structural difference: use Source view to merge';
+  toRight.disabled = !hunk.mergeableText;
+  toRight.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void mergeDifference('left-to-right', hunk.id);
+  });
+
+  group.append(toLeft, toRight);
+  elements.visualMergeGutter.append(group);
 }
 
 function scheduleVisualMergeGutter() {
@@ -751,18 +751,18 @@ function setActiveDifference(index, shouldScroll = false) {
   const hunk = activeHunk();
   if (!hunk) return;
 
-  state.programmaticUntil.left = performance.now() + 400;
-  state.programmaticUntil.right = performance.now() + 400;
+  state.programmaticUntil.left = performance.now() + 160;
+  state.programmaticUntil.right = performance.now() + 160;
 
   for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
     const target = frame.contentDocument?.querySelector(`[data-hce-hunk="${hunk.id}"]`);
-    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target?.scrollIntoView({ behavior: 'auto', block: 'center' });
   }
 
-  window.setTimeout(() => {
+  window.requestAnimationFrame(() => {
     renderVisualMergeGutter();
     updateDifferenceRail();
-  }, 500);
+  });
 }
 
 function navigateDifference(delta) {
