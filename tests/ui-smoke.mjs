@@ -89,7 +89,8 @@ try {
   assert.ok(pairCount >= 2, 'Expected multiple diff-local merge controls in Source view');
 
   const railValidation = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('#sourceCompare .source-row')];
+    const container = document.querySelector('#sourceCompare');
+    const rows = [...container.querySelectorAll('.source-row')];
     const hunkIds = [];
     for (const row of rows) {
       const id = row.dataset.hunkId;
@@ -97,13 +98,18 @@ try {
     }
 
     const markers = [...document.querySelectorAll('#differenceRail button')];
+    const containerRect = container.getBoundingClientRect();
+
     return hunkIds.map((id, index) => {
-      const indices = rows
-        .map((row, rowIndex) => row.dataset.hunkId === id ? rowIndex : -1)
-        .filter((rowIndex) => rowIndex >= 0);
-      const expected = rows.length <= 1
-        ? 50
-        : ((indices[0] + indices.at(-1)) / 2) / (rows.length - 1) * 100;
+      const hunkRows = [...container.querySelectorAll(`[data-hunk-id="${id}"]`)];
+      const tops = hunkRows.map(
+        (row) => row.getBoundingClientRect().top - containerRect.top + container.scrollTop
+      );
+      const bottoms = hunkRows.map(
+        (row) => row.getBoundingClientRect().bottom - containerRect.top + container.scrollTop
+      );
+      const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+      const expected = center / container.scrollHeight * 100;
       const actual = Number.parseFloat(markers[index]?.style.top ?? 'NaN');
       return { expected, actual };
     });
