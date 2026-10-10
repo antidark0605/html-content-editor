@@ -648,10 +648,10 @@ function renderVisualMergeGutter() {
 
   const index = Math.min(Math.max(state.activeDifferenceIndex, 0), hunks.length - 1);
   const hunk = hunks[index];
-  const height = elements.visualMergeGutter.clientHeight;
+  const height = Math.max(elements.visualMergeGutter.clientHeight, 36);
   const y = visualHunkCenterInGutter(hunk);
 
-  if (!Number.isFinite(y) || height <= 0 || y < -24 || y > height + 24) return;
+  if (!Number.isFinite(y)) return;
 
   const group = document.createElement('div');
   group.className = 'visual-merge-pair active';
