@@ -57,7 +57,50 @@ try {
   );
   const visualMergePairs = page.locator('#visualMergeGutter .visual-merge-pair');
   assert.ok(await visualMergePairs.count() > 0, 'Expected merge arrows beside visible differences');
+  assert.equal(await visualMergePairs.count(), 1, 'Visual view should show merge arrows only for the active diff');
   assert.ok(await visualMergePairs.first().locator('button').count() === 2);
+
+  const visualPlacement = await page.evaluate(() => {
+    const pair = document.querySelector('#visualMergeGutter .visual-merge-pair');
+    const frames = [
+      document.querySelector('#compareLeftFrame'),
+      document.querySelector('#compareRightFrame')
+    ];
+
+    const activeCenters = frames.map((frame) => {
+      const doc = frame.contentDocument;
+      const nodes = [...doc.querySelectorAll('.hce-active-diff')];
+      const tops = nodes.map((node) => node.getBoundingClientRect().top);
+      const bottoms = nodes.map((node) => node.getBoundingClientRect().bottom);
+      const top = Math.min(...tops);
+      const bottom = Math.max(...bottoms);
+      return {
+        top,
+        bottom,
+        viewportHeight: frame.clientHeight,
+        outerCenter: frame.getBoundingClientRect().top + (top + bottom) / 2
+      };
+    });
+
+    const pairRect = pair.getBoundingClientRect();
+    return {
+      activeCenters,
+      pairCenter: (pairRect.top + pairRect.bottom) / 2,
+      diffCenter: activeCenters.reduce((sum, item) => sum + item.outerCenter, 0) / activeCenters.length
+    };
+  });
+
+  for (const placement of visualPlacement.activeCenters) {
+    assert.ok(
+      placement.top >= -2 && placement.bottom <= placement.viewportHeight + 2,
+      `Active visual diff is not inside the viewport: ${JSON.stringify(placement)}`
+    );
+  }
+
+  assert.ok(
+    Math.abs(visualPlacement.pairCenter - visualPlacement.diffCenter) < 24,
+    `Merge arrows are not aligned with the active diff: pair=${visualPlacement.pairCenter}, diff=${visualPlacement.diffCenter}`
+  );
 
   await page.screenshot({
     path: path.join(outputDir, 'compare-visual.png'),
