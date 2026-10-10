@@ -1,6 +1,6 @@
 {
   "name": "html-content-editor",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Edit visible text in existing HTML files without rewriting their structure or styles.",
   "type": "module",
   "main": "src/main.mjs",
