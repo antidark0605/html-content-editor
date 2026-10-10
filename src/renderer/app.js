@@ -716,10 +716,15 @@ function setActiveDifference(index, shouldScroll = false) {
     for (const row of elements.sourceCompare.querySelectorAll('.active-hunk')) {
       row.classList.remove('active-hunk');
     }
+    for (const pair of elements.sourceCompare.querySelectorAll('.source-merge-pair.active')) {
+      pair.classList.remove('active');
+    }
     const hunk = activeHunk();
     if (!hunk) return;
     const rows = [...elements.sourceCompare.querySelectorAll(`[data-hunk-id="${hunk.id}"]`)];
     rows.forEach((row) => row.classList.add('active-hunk'));
+    const pair = rows.map((row) => row.querySelector('.source-merge-pair')).find(Boolean);
+    pair?.classList.add('active');
     if (shouldScroll && rows[0]) rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
@@ -852,6 +857,7 @@ function syncVisualScrollFrom(side) {
 }
 
 function onVisualScroll(side) {
+  scheduleVisualMergeGutter();
   if (performance.now() < state.programmaticUntil[side]) return;
   if (!state.scrollDriver) setScrollDriver(side);
   if (state.scrollDriver !== side) return;
