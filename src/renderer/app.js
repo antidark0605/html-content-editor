@@ -89,7 +89,8 @@ const state = {
   scrollDriver: null,
   scrollDriverTimer: null,
   programmaticUntil: { left: 0, right: 0 },
-  pendingInitialDifferenceScroll: false
+  pendingInitialDifferenceScroll: false,
+  visualCenterGeneration: 0
 };
 
 function escapeHtmlText(value) {
@@ -751,17 +752,7 @@ function setActiveDifference(index, shouldScroll = false) {
   const hunk = activeHunk();
   if (!hunk) return;
 
-  state.programmaticUntil.left = performance.now() + 160;
-  state.programmaticUntil.right = performance.now() + 160;
-
-  for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
-    centerFrameOnHunk(frame, hunk.id);
-  }
-
-  window.requestAnimationFrame(() => {
-    renderVisualMergeGutter();
-    updateDifferenceRail();
-  });
+  settleActiveVisualDiff(hunk.id);
 }
 
 function navigateDifference(delta) {
@@ -787,6 +778,30 @@ function centerFrameOnHunk(frame, hunkId) {
     0,
     Math.min(maxTop, center - scroller.clientHeight / 2)
   );
+}
+
+function settleActiveVisualDiff(hunkId) {
+  const generation = ++state.visualCenterGeneration;
+
+  const recenter = () => {
+    if (generation !== state.visualCenterGeneration) return;
+    if (state.compareView !== 'visual' || activeHunk()?.id !== hunkId) return;
+    if (!state.compareFrameReady.left || !state.compareFrameReady.right) return;
+
+    const until = performance.now() + 180;
+    state.programmaticUntil.left = until;
+    state.programmaticUntil.right = until;
+
+    centerFrameOnHunk(elements.compareLeftFrame, hunkId);
+    centerFrameOnHunk(elements.compareRightFrame, hunkId);
+    rebuildAlignmentPoints();
+    renderVisualMergeGutter();
+    updateDifferenceRail();
+  };
+
+  window.requestAnimationFrame(recenter);
+  window.setTimeout(recenter, 80);
+  window.setTimeout(recenter, 240);
 }
 
 function scrollingElement(frame) {
@@ -847,6 +862,7 @@ function rebuildAlignmentPoints() {
 }
 
 function setScrollDriver(side) {
+  state.visualCenterGeneration += 1;
   state.scrollDriver = side;
   state.programmaticUntil[side] = 0;
   window.clearTimeout(state.scrollDriverTimer);

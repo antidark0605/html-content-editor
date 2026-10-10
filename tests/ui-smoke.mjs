@@ -46,7 +46,22 @@ try {
   assert.ok(leftHunks > 0);
   assert.ok(rightHunks > 0);
 
-  await page.waitForTimeout(350);
+  await page.waitForFunction(() => {
+    const frames = [
+      document.querySelector('#compareLeftFrame'),
+      document.querySelector('#compareRightFrame')
+    ];
+
+    return frames.every((frame) => {
+      const nodes = [...frame.contentDocument.querySelectorAll('.hce-active-diff')];
+      if (nodes.length === 0) return false;
+
+      const top = Math.min(...nodes.map((node) => node.getBoundingClientRect().top));
+      const bottom = Math.max(...nodes.map((node) => node.getBoundingClientRect().bottom));
+      return top >= -2 && bottom <= frame.clientHeight + 2;
+    });
+  });
+
   const activeLeft = await leftFrame.locator('.hce-active-diff').count();
   const activeRight = await rightFrame.locator('.hce-active-diff').count();
   assert.ok(activeLeft > 0);
@@ -106,6 +121,8 @@ try {
     path: path.join(outputDir, 'compare-visual.png'),
     fullPage: true
   });
+
+  await page.waitForTimeout(300);
 
   await leftFrame.evaluate(() => {
     const scroller = document.scrollingElement;
