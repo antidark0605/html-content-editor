@@ -758,6 +758,11 @@ function setActiveDifference(index, shouldScroll = false) {
     const target = frame.contentDocument?.querySelector(`[data-hce-hunk="${hunk.id}"]`);
     target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
+
+  window.setTimeout(() => {
+    renderVisualMergeGutter();
+    updateDifferenceRail();
+  }, 500);
 }
 
 function navigateDifference(delta) {
