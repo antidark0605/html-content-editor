@@ -52,6 +52,9 @@ try {
   assert.ok(activeLeft > 0);
   assert.ok(activeRight > 0);
 
+  await page.waitForFunction(() =>
+    document.querySelectorAll('#visualMergeGutter .visual-merge-pair').length > 0
+  );
   const visualMergePairs = page.locator('#visualMergeGutter .visual-merge-pair');
   assert.ok(await visualMergePairs.count() > 0, 'Expected merge arrows beside visible differences');
   assert.ok(await visualMergePairs.first().locator('button').count() === 2);
