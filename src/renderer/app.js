@@ -86,7 +86,8 @@ const state = {
   alignmentPoints: [],
   scrollDriver: null,
   scrollDriverTimer: null,
-  programmaticUntil: { left: 0, right: 0 }
+  programmaticUntil: { left: 0, right: 0 },
+  pendingInitialDifferenceScroll: false
 };
 
 function escapeHtmlText(value) {
@@ -769,6 +770,11 @@ function wireCompareFrame(side) {
     window.requestAnimationFrame(() => {
       rebuildAlignmentPoints();
       markActiveVisualHunk();
+
+      if (state.pendingInitialDifferenceScroll && currentHunks().length > 0) {
+        state.pendingInitialDifferenceScroll = false;
+        setActiveDifference(state.activeDifferenceIndex, true);
+      }
     });
   }
 }
@@ -920,6 +926,9 @@ function applyCompareResult(result, options = {}) {
     options.keepIndex ? state.activeDifferenceIndex : 0,
     Math.max(0, hunkCount - 1)
   );
+  if (!options.keepIndex && hunkCount > 0) {
+    state.pendingInitialDifferenceScroll = true;
+  }
   renderCompare();
 }
 
@@ -1270,15 +1279,9 @@ Promise.all([
 ]).then(([existing, compare]) => {
   if (existing) loadSession(existing);
 
-  if (compare?.state) {
-    state.compare.left = compare.state.left;
-    state.compare.right = compare.state.right;
-    state.compareAnalysis = compare.analysis;
-
-    if (state.compare.left || state.compare.right) {
-      state.workspaceMode = 'compare';
-      refreshWorkspaceVisibility();
-      renderCompare();
-    }
+  if (compare?.state && (compare.state.left || compare.state.right)) {
+    state.workspaceMode = 'compare';
+    refreshWorkspaceVisibility();
+    applyCompareResult(compare);
   }
 });
