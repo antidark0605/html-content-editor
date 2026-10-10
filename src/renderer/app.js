@@ -1,4 +1,10 @@
-import { clampZoom, COMPARE_ZOOM_STEP, scrollRatio, scrollTopForRatio } from '../compare-utils.mjs';
+import {
+  clampZoom,
+  COMPARE_ZOOM_STEP,
+  mapAlignedPosition,
+  scrollRatio,
+  scrollTopForRatio
+} from '../compare-utils.mjs';
 
 const elements = {
   openButton: document.querySelector('#openButton'),
@@ -9,6 +15,7 @@ const elements = {
   workspaceModeButtons: [...document.querySelectorAll('[data-workspace-mode]')],
   editorTools: document.querySelector('#editorTools'),
   compareTools: document.querySelector('#compareTools'),
+  compareViewButtons: [...document.querySelectorAll('[data-compare-view]')],
   undoButton: document.querySelector('#undoButton'),
   redoButton: document.querySelector('#redoButton'),
   searchInput: document.querySelector('#searchInput'),
@@ -24,18 +31,32 @@ const elements = {
   pageFrame: document.querySelector('#pageFrame'),
   diffPanel: document.querySelector('#diffPanel'),
   compareWorkspace: document.querySelector('#compareWorkspace'),
+  visualCompare: document.querySelector('#visualCompare'),
+  sourceCompare: document.querySelector('#sourceCompare'),
+  differenceRail: document.querySelector('#differenceRail'),
   compareLeftFrame: document.querySelector('#compareLeftFrame'),
   compareRightFrame: document.querySelector('#compareRightFrame'),
   compareLeftName: document.querySelector('#compareLeftName'),
   compareRightName: document.querySelector('#compareRightName'),
+  compareLeftDirty: document.querySelector('#compareLeftDirty'),
+  compareRightDirty: document.querySelector('#compareRightDirty'),
   compareLeftScriptWarning: document.querySelector('#compareLeftScriptWarning'),
   compareRightScriptWarning: document.querySelector('#compareRightScriptWarning'),
   openCompareLeftButton: document.querySelector('#openCompareLeftButton'),
   openCompareRightButton: document.querySelector('#openCompareRightButton'),
   reloadCompareLeftButton: document.querySelector('#reloadCompareLeftButton'),
   reloadCompareRightButton: document.querySelector('#reloadCompareRightButton'),
+  saveCompareLeftButton: document.querySelector('#saveCompareLeftButton'),
+  saveCompareRightButton: document.querySelector('#saveCompareRightButton'),
   swapCompareButton: document.querySelector('#swapCompareButton'),
+  previousDifferenceButton: document.querySelector('#previousDifferenceButton'),
+  nextDifferenceButton: document.querySelector('#nextDifferenceButton'),
+  differenceCount: document.querySelector('#differenceCount'),
+  mergeRightToLeftButton: document.querySelector('#mergeRightToLeftButton'),
+  mergeLeftToRightButton: document.querySelector('#mergeLeftToRightButton'),
+  syncScrollLabel: document.querySelector('#syncScrollLabel'),
   syncScrollCheckbox: document.querySelector('#syncScrollCheckbox'),
+  zoomControls: document.querySelector('#zoomControls'),
   zoomOutButton: document.querySelector('#zoomOutButton'),
   zoomResetButton: document.querySelector('#zoomResetButton'),
   zoomInButton: document.querySelector('#zoomInButton'),
@@ -56,9 +77,16 @@ const state = {
   pendingCommit: Promise.resolve(),
   workspaceMode: 'editor',
   compare: { left: null, right: null },
+  compareAnalysis: null,
+  compareView: 'visual',
+  activeDifferenceIndex: 0,
   compareZoom: 1,
   syncScroll: true,
-  syncingScroll: false
+  compareFrameReady: { left: false, right: false },
+  alignmentPoints: [],
+  scrollDriver: null,
+  scrollDriverTimer: null,
+  programmaticUntil: { left: 0, right: 0 }
 };
 
 function escapeHtmlText(value) {
@@ -93,7 +121,7 @@ function injectIntoHead(html, addition) {
 
 function baseTagFor(source, baseHref) {
   if (/<base\b/i.test(source ?? '')) return '';
-  return '<base href="' + escapeAttribute(baseHref ?? '') + '">';
+  return `<base href="${escapeAttribute(baseHref ?? '')}">`;
 }
 
 function baseTag() {
@@ -123,6 +151,39 @@ function editorStyle() {
   </style>`;
 }
 
+function compareStyle() {
+  return `<style data-hce-compare-style>
+    .hce-compare-node {
+      border-radius: 2px !important;
+      transition: outline-color 80ms linear !important;
+    }
+    .hce-compare-changed {
+      background: rgba(245, 158, 11, 0.20) !important;
+      box-shadow: inset 0 -2px rgba(217, 119, 6, 0.35) !important;
+    }
+    .hce-compare-removed {
+      background: rgba(248, 81, 73, 0.20) !important;
+      box-shadow: inset 0 -2px rgba(220, 38, 38, 0.35) !important;
+    }
+    .hce-compare-added {
+      background: rgba(46, 160, 67, 0.20) !important;
+      box-shadow: inset 0 -2px rgba(22, 163, 74, 0.35) !important;
+    }
+    .hce-inline-left {
+      background: rgba(248, 81, 73, 0.34) !important;
+      border-radius: 2px !important;
+    }
+    .hce-inline-right {
+      background: rgba(46, 160, 67, 0.34) !important;
+      border-radius: 2px !important;
+    }
+    .hce-active-diff {
+      outline: 2px solid #1f6feb !important;
+      outline-offset: 2px !important;
+    }
+  </style>`;
+}
+
 function buildEditableDocument() {
   const { source, textNodes } = state.session;
   const parts = [];
@@ -143,10 +204,7 @@ function buildEditableDocument() {
 
   parts.push(source.slice(cursor));
 
-  return injectIntoHead(
-    parts.join(''),
-    `${baseTag()}${editorStyle()}`
-  );
+  return injectIntoHead(parts.join(''), `${baseTag()}${editorStyle()}`);
 }
 
 function buildPreviewDocument() {
@@ -161,7 +219,17 @@ function emptyCompareDocument(side) {
 function buildCompareDocument(side) {
   const page = state.compare[side];
   if (!page) return emptyCompareDocument(side);
-  return injectIntoHead(page.source, baseTagFor(page.source, page.baseHref));
+
+  const instrumented = state.compareAnalysis?.visual
+    ? side === 'left'
+      ? state.compareAnalysis.visual.leftHtml
+      : state.compareAnalysis.visual.rightHtml
+    : page.source;
+
+  return injectIntoHead(
+    instrumented,
+    `${baseTagFor(page.source, page.baseHref)}${compareStyle()}`
+  );
 }
 
 function showToast(message) {
@@ -170,7 +238,7 @@ function showToast(message) {
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => {
     elements.toast.classList.add('hidden');
-  }, 3200);
+  }, 3400);
 }
 
 function setDirty(dirty) {
@@ -333,7 +401,6 @@ async function renderDiff() {
   for (const part of parts) {
     const line = document.createElement('span');
     line.className = `diff-line ${part.added ? 'added' : part.removed ? 'removed' : 'context'}`;
-
     const prefix = part.added ? '+ ' : part.removed ? '- ' : '  ';
     line.textContent = prefix + part.value;
     elements.diffPanel.append(line);
@@ -354,7 +421,6 @@ async function setMode(mode) {
   if (mode === 'preview') renderPreview();
   if (mode === 'diff') await renderDiff();
 }
-
 
 function refreshWorkspaceVisibility() {
   const editorActive = state.workspaceMode === 'editor';
@@ -385,6 +451,7 @@ async function setWorkspaceMode(mode) {
 
   state.workspaceMode = mode;
   refreshWorkspaceVisibility();
+  if (mode === 'compare') renderCompare();
 }
 
 function compareElementsFor(side) {
@@ -392,17 +459,165 @@ function compareElementsFor(side) {
     return {
       frame: elements.compareLeftFrame,
       name: elements.compareLeftName,
+      dirty: elements.compareLeftDirty,
       warning: elements.compareLeftScriptWarning,
-      reload: elements.reloadCompareLeftButton
+      reload: elements.reloadCompareLeftButton,
+      save: elements.saveCompareLeftButton
     };
   }
 
   return {
     frame: elements.compareRightFrame,
     name: elements.compareRightName,
+    dirty: elements.compareRightDirty,
     warning: elements.compareRightScriptWarning,
-    reload: elements.reloadCompareRightButton
+    reload: elements.reloadCompareRightButton,
+    save: elements.saveCompareRightButton
   };
+}
+
+function updateCompareHeader(side) {
+  const page = state.compare[side];
+  const controls = compareElementsFor(side);
+  controls.name.textContent = page?.fileName ?? 'No file open';
+  controls.name.title = page?.filePath ?? '';
+  controls.dirty.classList.toggle('hidden', !page?.dirty);
+  controls.warning.classList.toggle('hidden', !page?.hasScripts || state.compareView === 'source');
+  controls.reload.disabled = !page;
+  controls.save.disabled = !page?.dirty;
+}
+
+function currentHunks() {
+  if (!state.compareAnalysis) return [];
+  return state.compareView === 'source'
+    ? state.compareAnalysis.source?.hunks ?? []
+    : state.compareAnalysis.visual?.hunks ?? [];
+}
+
+function activeHunk() {
+  const hunks = currentHunks();
+  if (hunks.length === 0) return null;
+  const index = Math.min(Math.max(state.activeDifferenceIndex, 0), hunks.length - 1);
+  return hunks[index] ?? null;
+}
+
+function updateDifferenceRail() {
+  const hunks = currentHunks();
+  elements.differenceRail.replaceChildren();
+
+  hunks.forEach((hunk, index) => {
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.title = `Difference ${index + 1} of ${hunks.length}`;
+    marker.style.top = hunks.length === 1
+      ? '50%'
+      : `${5 + (index / (hunks.length - 1)) * 90}%`;
+    marker.classList.toggle('active', index === state.activeDifferenceIndex);
+    marker.addEventListener('click', () => setActiveDifference(index, true));
+    elements.differenceRail.append(marker);
+  });
+}
+
+function updateDifferenceControls() {
+  const hunks = currentHunks();
+  const hasDifferences = hunks.length > 0;
+
+  if (!hasDifferences) {
+    state.activeDifferenceIndex = 0;
+    elements.differenceCount.textContent = state.compare.left && state.compare.right
+      ? 'No differences'
+      : '0 differences';
+  } else {
+    state.activeDifferenceIndex = Math.min(state.activeDifferenceIndex, hunks.length - 1);
+    elements.differenceCount.textContent = `${state.activeDifferenceIndex + 1} / ${hunks.length}`;
+  }
+
+  elements.previousDifferenceButton.disabled = !hasDifferences;
+  elements.nextDifferenceButton.disabled = !hasDifferences;
+
+  const hunk = activeHunk();
+  const visualMergeable = state.compareView !== 'visual' || Boolean(hunk?.mergeableText);
+  const mergeEnabled = Boolean(hunk) && visualMergeable;
+
+  elements.mergeRightToLeftButton.disabled = !mergeEnabled;
+  elements.mergeLeftToRightButton.disabled = !mergeEnabled;
+
+  if (state.compareView === 'visual' && hunk && !hunk.mergeableText) {
+    const reason = 'This change adds/removes text blocks. Switch to Source to merge it.';
+    elements.mergeRightToLeftButton.title = reason;
+    elements.mergeLeftToRightButton.title = reason;
+  } else {
+    elements.mergeRightToLeftButton.title = 'Copy selected difference from right to left';
+    elements.mergeLeftToRightButton.title = 'Copy selected difference from left to right';
+  }
+
+  updateDifferenceRail();
+}
+
+function markActiveVisualHunk() {
+  for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
+    const doc = frame.contentDocument;
+    if (!doc) continue;
+    for (const node of doc.querySelectorAll('.hce-active-diff')) {
+      node.classList.remove('hce-active-diff');
+    }
+  }
+
+  const hunk = activeHunk();
+  if (!hunk) return;
+
+  for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
+    const doc = frame.contentDocument;
+    if (!doc) continue;
+    for (const node of doc.querySelectorAll(`[data-hce-hunk="${hunk.id}"]`)) {
+      node.classList.add('hce-active-diff');
+    }
+  }
+}
+
+function setActiveDifference(index, shouldScroll = false) {
+  const hunks = currentHunks();
+  if (hunks.length === 0) {
+    state.activeDifferenceIndex = 0;
+    updateDifferenceControls();
+    return;
+  }
+
+  const normalized = ((index % hunks.length) + hunks.length) % hunks.length;
+  state.activeDifferenceIndex = normalized;
+  updateDifferenceControls();
+
+  if (state.compareView === 'source') {
+    for (const row of elements.sourceCompare.querySelectorAll('.active-hunk')) {
+      row.classList.remove('active-hunk');
+    }
+    const hunk = activeHunk();
+    if (!hunk) return;
+    const rows = [...elements.sourceCompare.querySelectorAll(`[data-hunk-id="${hunk.id}"]`)];
+    rows.forEach((row) => row.classList.add('active-hunk'));
+    if (shouldScroll && rows[0]) rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+
+  markActiveVisualHunk();
+  if (!shouldScroll) return;
+
+  const hunk = activeHunk();
+  if (!hunk) return;
+
+  state.programmaticUntil.left = performance.now() + 400;
+  state.programmaticUntil.right = performance.now() + 400;
+
+  for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
+    const target = frame.contentDocument?.querySelector(`[data-hce-hunk="${hunk.id}"]`);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+function navigateDifference(delta) {
+  const hunks = currentHunks();
+  if (hunks.length === 0) return;
+  setActiveDifference(state.activeDifferenceIndex + delta, true);
 }
 
 function scrollingElement(frame) {
@@ -417,38 +632,110 @@ function applyCompareZoom(frame) {
   doc.documentElement.style.zoom = String(state.compareZoom);
 }
 
-function setCompareZoom(nextZoom) {
-  state.compareZoom = clampZoom(nextZoom);
-  elements.zoomLabel.textContent = Math.round(state.compareZoom * 100) + '%';
-  applyCompareZoom(elements.compareLeftFrame);
-  applyCompareZoom(elements.compareRightFrame);
+function rebuildAlignmentPoints() {
+  const leftScroller = scrollingElement(elements.compareLeftFrame);
+  const rightScroller = scrollingElement(elements.compareRightFrame);
+  const leftDoc = elements.compareLeftFrame.contentDocument;
+  const rightDoc = elements.compareRightFrame.contentDocument;
+
+  if (!leftScroller || !rightScroller || !leftDoc || !rightDoc) {
+    state.alignmentPoints = [];
+    return;
+  }
+
+  const points = [{
+    left: 0,
+    right: 0
+  }];
+
+  for (const anchor of state.compareAnalysis?.visual?.anchors ?? []) {
+    const left = leftDoc.querySelector(`[data-hce-compare-id="${anchor.leftId}"]`);
+    const right = rightDoc.querySelector(`[data-hce-compare-id="${anchor.rightId}"]`);
+    if (!left || !right) continue;
+
+    points.push({
+      left: left.getBoundingClientRect().top + leftScroller.scrollTop,
+      right: right.getBoundingClientRect().top + rightScroller.scrollTop
+    });
+  }
+
+  points.push({
+    left: leftScroller.scrollHeight,
+    right: rightScroller.scrollHeight
+  });
+
+  points.sort((a, b) => a.left - b.left);
+
+  const monotonic = [];
+  let lastRight = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    if (point.right + 1 < lastRight) continue;
+    monotonic.push(point);
+    lastRight = Math.max(lastRight, point.right);
+  }
+
+  state.alignmentPoints = monotonic;
 }
 
-function syncScrollFrom(side) {
-  if (!state.syncScroll || state.syncingScroll) return;
+function setScrollDriver(side) {
+  state.scrollDriver = side;
+  state.programmaticUntil[side] = 0;
+  window.clearTimeout(state.scrollDriverTimer);
+  state.scrollDriverTimer = window.setTimeout(() => {
+    state.scrollDriver = null;
+  }, 240);
+}
 
+function syncVisualScrollFrom(side) {
+  if (!state.syncScroll) return;
+
+  const targetSide = side === 'left' ? 'right' : 'left';
   const sourceFrame = side === 'left' ? elements.compareLeftFrame : elements.compareRightFrame;
-  const targetFrame = side === 'left' ? elements.compareRightFrame : elements.compareLeftFrame;
+  const targetFrame = targetSide === 'left' ? elements.compareLeftFrame : elements.compareRightFrame;
   const sourceScroller = scrollingElement(sourceFrame);
   const targetScroller = scrollingElement(targetFrame);
   if (!sourceScroller || !targetScroller) return;
 
-  const ratio = scrollRatio(
-    sourceScroller.scrollTop,
-    sourceScroller.scrollHeight,
-    sourceScroller.clientHeight
+  if (state.alignmentPoints.length < 2) {
+    const ratio = scrollRatio(sourceScroller.scrollTop, sourceScroller.scrollHeight, sourceScroller.clientHeight);
+    state.programmaticUntil[targetSide] = performance.now() + 140;
+    targetScroller.scrollTop = scrollTopForRatio(ratio, targetScroller.scrollHeight, targetScroller.clientHeight);
+    return;
+  }
+
+  const sourceKey = side;
+  const targetKey = targetSide;
+  const sourceCenter = sourceScroller.scrollTop + sourceScroller.clientHeight / 2;
+  const targetCenter = mapAlignedPosition(
+    state.alignmentPoints,
+    sourceCenter,
+    sourceKey,
+    targetKey
   );
 
-  state.syncingScroll = true;
-  targetScroller.scrollTop = scrollTopForRatio(
-    ratio,
-    targetScroller.scrollHeight,
-    targetScroller.clientHeight
+  const nextTop = Math.max(
+    0,
+    Math.min(
+      targetScroller.scrollHeight - targetScroller.clientHeight,
+      targetCenter - targetScroller.clientHeight / 2
+    )
   );
 
-  window.requestAnimationFrame(() => {
-    state.syncingScroll = false;
-  });
+  state.programmaticUntil[targetSide] = performance.now() + 140;
+  targetScroller.scrollTop = nextTop;
+}
+
+function onVisualScroll(side) {
+  if (performance.now() < state.programmaticUntil[side]) return;
+  if (!state.scrollDriver) setScrollDriver(side);
+  if (state.scrollDriver !== side) return;
+
+  window.clearTimeout(state.scrollDriverTimer);
+  state.scrollDriverTimer = window.setTimeout(() => {
+    state.scrollDriver = null;
+  }, 240);
+
+  window.requestAnimationFrame(() => syncVisualScrollFrom(side));
 }
 
 function wireCompareFrame(side) {
@@ -457,35 +744,183 @@ function wireCompareFrame(side) {
   const win = frame.contentWindow;
   if (!doc || !win) return;
 
+  state.compareFrameReady[side] = true;
   applyCompareZoom(frame);
 
-  doc.addEventListener(
-    'click',
-    (event) => {
-      const anchor = event.target.closest?.('a');
-      if (anchor) event.preventDefault();
-    },
-    true
-  );
+  doc.addEventListener('click', (event) => {
+    const anchor = event.target.closest?.('a');
+    if (anchor) event.preventDefault();
 
-  win.addEventListener('scroll', () => syncScrollFrom(side), { passive: true });
-}
+    const changed = event.target.closest?.('[data-hce-hunk]');
+    if (changed) {
+      const hunks = currentHunks();
+      const index = hunks.findIndex((hunk) => hunk.id === changed.dataset.hceHunk);
+      if (index >= 0) setActiveDifference(index, false);
+    }
+  }, true);
 
-function updateCompareHeader(side) {
-  const page = state.compare[side];
-  const controls = compareElementsFor(side);
-  controls.name.textContent = page?.fileName ?? 'No file open';
-  controls.name.title = page?.filePath ?? '';
-  controls.warning.classList.toggle('hidden', !page?.hasScripts);
-  controls.reload.disabled = !page;
+  for (const eventName of ['wheel', 'pointerdown', 'touchstart']) {
+    doc.addEventListener(eventName, () => setScrollDriver(side), { passive: true });
+  }
+
+  win.addEventListener('scroll', () => onVisualScroll(side), { passive: true });
+
+  if (state.compareFrameReady.left && state.compareFrameReady.right) {
+    window.requestAnimationFrame(() => {
+      rebuildAlignmentPoints();
+      markActiveVisualHunk();
+    });
+  }
 }
 
 function renderCompareSide(side) {
   const { frame } = compareElementsFor(side);
   updateCompareHeader(side);
+  state.compareFrameReady[side] = false;
   frame.onload = () => wireCompareFrame(side);
   frame.setAttribute('sandbox', 'allow-same-origin');
   frame.srcdoc = buildCompareDocument(side);
+}
+
+function appendInlineParts(container, parts, side) {
+  if (!parts) return;
+
+  for (const part of parts) {
+    const span = document.createElement('span');
+    span.textContent = part.text;
+    if (part.changed) span.className = side === 'left' ? 'inline-left' : 'inline-right';
+    container.append(span);
+  }
+}
+
+function sourceCell(side, row) {
+  const cell = document.createElement('div');
+  cell.className = `source-cell ${side}`;
+
+  const number = document.createElement('span');
+  number.className = 'source-line-number';
+  const lineNumber = side === 'left' ? row.leftLineNumber : row.rightLineNumber;
+  number.textContent = lineNumber ?? '';
+
+  const text = document.createElement('span');
+  text.className = 'source-line-text';
+  const rawText = side === 'left' ? row.leftText : row.rightText;
+  const parts = side === 'left' ? row.leftParts : row.rightParts;
+
+  if (lineNumber === null) text.classList.add('source-gap');
+
+  if (row.hunkId && parts) {
+    appendInlineParts(text, parts, side);
+  } else {
+    text.textContent = rawText;
+  }
+
+  cell.append(number, text);
+  return cell;
+}
+
+function renderSourceCompare() {
+  elements.sourceCompare.replaceChildren();
+
+  const analysis = state.compareAnalysis?.source;
+  if (!state.compare.left || !state.compare.right || !analysis) {
+    const empty = document.createElement('div');
+    empty.className = 'compare-empty';
+    empty.textContent = 'Open a left and right HTML file to compare their source.';
+    elements.sourceCompare.append(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  for (const row of analysis.rows) {
+    const line = document.createElement('div');
+    line.className = `source-row ${row.hunkId ? `hunk-${row.kind}` : ''}`;
+    if (row.hunkId) {
+      line.dataset.hunkId = row.hunkId;
+      line.addEventListener('click', () => {
+        const index = analysis.hunks.findIndex((hunk) => hunk.id === row.hunkId);
+        if (index >= 0) setActiveDifference(index, false);
+      });
+    }
+
+    const gutter = document.createElement('div');
+    gutter.className = 'source-gutter';
+
+    if (row.hunkId && row.hunkFirstRow) {
+      const toLeft = document.createElement('button');
+      toLeft.type = 'button';
+      toLeft.textContent = '←';
+      toLeft.title = 'Copy this difference from right to left';
+      toLeft.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void mergeDifference('right-to-left', row.hunkId);
+      });
+
+      const toRight = document.createElement('button');
+      toRight.type = 'button';
+      toRight.textContent = '→';
+      toRight.title = 'Copy this difference from left to right';
+      toRight.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void mergeDifference('left-to-right', row.hunkId);
+      });
+
+      gutter.append(toLeft, toRight);
+    }
+
+    line.append(sourceCell('left', row), gutter, sourceCell('right', row));
+    fragment.append(line);
+  }
+
+  elements.sourceCompare.append(fragment);
+  setActiveDifference(state.activeDifferenceIndex, false);
+}
+
+function renderCompare() {
+  updateCompareHeader('left');
+  updateCompareHeader('right');
+
+  const visual = state.compareView === 'visual';
+  elements.visualCompare.classList.toggle('hidden', !visual);
+  elements.sourceCompare.classList.toggle('hidden', visual);
+  elements.syncScrollLabel.classList.toggle('hidden', !visual);
+  elements.zoomControls.classList.toggle('hidden', !visual);
+
+  for (const button of elements.compareViewButtons) {
+    button.classList.toggle('active', button.dataset.compareView === state.compareView);
+  }
+
+  if (visual) {
+    renderCompareSide('left');
+    renderCompareSide('right');
+  } else {
+    renderSourceCompare();
+  }
+
+  updateDifferenceControls();
+}
+
+function setCompareView(view) {
+  if (view !== 'visual' && view !== 'source') return;
+  state.compareView = view;
+  state.activeDifferenceIndex = 0;
+  renderCompare();
+}
+
+function applyCompareResult(result, options = {}) {
+  if (result?.state) {
+    state.compare.left = result.state.left;
+    state.compare.right = result.state.right;
+  }
+
+  state.compareAnalysis = result?.analysis ?? null;
+  const hunkCount = currentHunks().length;
+  state.activeDifferenceIndex = Math.min(
+    options.keepIndex ? state.activeDifferenceIndex : 0,
+    Math.max(0, hunkCount - 1)
+  );
+  renderCompare();
 }
 
 async function openCompare(side) {
@@ -495,10 +930,7 @@ async function openCompare(side) {
     return;
   }
 
-  if (!result.cancelled && result.page) {
-    state.compare[side] = result.page;
-    renderCompareSide(side);
-  }
+  if (!result.cancelled) applyCompareResult(result);
 }
 
 async function reloadCompare(side) {
@@ -508,19 +940,60 @@ async function reloadCompare(side) {
     return;
   }
 
-  if (!result.missing && result.page) {
-    state.compare[side] = result.page;
-    renderCompareSide(side);
+  if (!result.missing && !result.cancelled) {
+    applyCompareResult(result);
     showToast((side === 'left' ? 'Left' : 'Right') + ' page reloaded.');
   }
 }
 
 async function swapCompare() {
   const result = await window.hce.swapCompare();
-  state.compare.left = result.left;
-  state.compare.right = result.right;
-  renderCompareSide('left');
-  renderCompareSide('right');
+  applyCompareResult(result);
+}
+
+async function saveCompare(side) {
+  const result = await window.hce.saveCompare(side);
+  if (!result.ok) {
+    showToast('Save failed: ' + result.reason);
+    return;
+  }
+
+  applyCompareResult(result, { keepIndex: true });
+  if (result.backupPath) {
+    showToast(`Saved ${side}. Backup created: ${result.backupPath}`);
+  } else {
+    showToast(`Saved ${side}.`);
+  }
+}
+
+async function mergeDifference(direction, explicitHunkId = null) {
+  const hunk = explicitHunkId
+    ? currentHunks().find((candidate) => candidate.id === explicitHunkId)
+    : activeHunk();
+
+  if (!hunk) return;
+
+  const result = await window.hce.mergeCompare(state.compareView, hunk.id, direction);
+  if (!result.ok) {
+    showToast(result.reason);
+    return;
+  }
+
+  applyCompareResult(result, { keepIndex: true });
+  showToast(direction === 'left-to-right'
+    ? 'Copied selected difference to the right.'
+    : 'Copied selected difference to the left.');
+}
+
+function setCompareZoom(nextZoom) {
+  state.compareZoom = clampZoom(nextZoom);
+  elements.zoomLabel.textContent = Math.round(state.compareZoom * 100) + '%';
+
+  for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
+    applyCompareZoom(frame);
+  }
+
+  window.requestAnimationFrame(rebuildAlignmentPoints);
 }
 
 function loadSession(session) {
@@ -555,9 +1028,7 @@ async function openHtml() {
     return;
   }
 
-  if (!result.cancelled && result.session) {
-    loadSession(result.session);
-  }
+  if (!result.cancelled && result.session) loadSession(result.session);
 }
 
 async function save() {
@@ -678,11 +1149,21 @@ for (const button of elements.workspaceModeButtons) {
   button.addEventListener('click', () => void setWorkspaceMode(button.dataset.workspaceMode));
 }
 
+for (const button of elements.compareViewButtons) {
+  button.addEventListener('click', () => setCompareView(button.dataset.compareView));
+}
+
 elements.openCompareLeftButton.addEventListener('click', () => void openCompare('left'));
 elements.openCompareRightButton.addEventListener('click', () => void openCompare('right'));
 elements.reloadCompareLeftButton.addEventListener('click', () => void reloadCompare('left'));
 elements.reloadCompareRightButton.addEventListener('click', () => void reloadCompare('right'));
+elements.saveCompareLeftButton.addEventListener('click', () => void saveCompare('left'));
+elements.saveCompareRightButton.addEventListener('click', () => void saveCompare('right'));
 elements.swapCompareButton.addEventListener('click', () => void swapCompare());
+elements.previousDifferenceButton.addEventListener('click', () => navigateDifference(-1));
+elements.nextDifferenceButton.addEventListener('click', () => navigateDifference(1));
+elements.mergeRightToLeftButton.addEventListener('click', () => void mergeDifference('right-to-left'));
+elements.mergeLeftToRightButton.addEventListener('click', () => void mergeDifference('left-to-right'));
 elements.syncScrollCheckbox.addEventListener('change', () => {
   state.syncScroll = elements.syncScrollCheckbox.checked;
 });
@@ -710,6 +1191,18 @@ elements.searchNextButton.addEventListener('click', () => runSearch(true));
 document.addEventListener('keydown', (event) => {
   const modifier = event.ctrlKey || event.metaKey;
 
+  if (state.workspaceMode === 'compare' && modifier && event.altKey && event.key === 'ArrowDown') {
+    event.preventDefault();
+    navigateDifference(1);
+    return;
+  }
+
+  if (state.workspaceMode === 'compare' && modifier && event.altKey && event.key === 'ArrowUp') {
+    event.preventDefault();
+    navigateDifference(-1);
+    return;
+  }
+
   if (modifier && event.key.toLowerCase() === 'o') {
     event.preventDefault();
     if (state.workspaceMode === 'compare') {
@@ -720,7 +1213,18 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  if (state.workspaceMode !== 'editor') return;
+  if (state.workspaceMode === 'compare') {
+    if (modifier && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      const dirty = ['left', 'right'].filter((side) => state.compare[side]?.dirty);
+      if (dirty.length === 1) {
+        void saveCompare(dirty[0]);
+      } else if (dirty.length > 1) {
+        showToast('Both sides have unsaved merges. Use the Save button on each side.');
+      }
+    }
+    return;
+  }
 
   if (modifier && event.key.toLowerCase() === 's') {
     event.preventDefault();
@@ -760,6 +1264,21 @@ renderCompareSide('right');
 setCompareZoom(1);
 refreshWorkspaceVisibility();
 
-window.hce.getSession().then((existing) => {
+Promise.all([
+  window.hce.getSession(),
+  window.hce.getCompareState()
+]).then(([existing, compare]) => {
   if (existing) loadSession(existing);
+
+  if (compare?.state) {
+    state.compare.left = compare.state.left;
+    state.compare.right = compare.state.right;
+    state.compareAnalysis = compare.analysis;
+
+    if (state.compare.left || state.compare.right) {
+      state.workspaceMode = 'compare';
+      refreshWorkspaceVisibility();
+      renderCompare();
+    }
+  }
 });
