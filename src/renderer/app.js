@@ -755,8 +755,7 @@ function setActiveDifference(index, shouldScroll = false) {
   state.programmaticUntil.right = performance.now() + 160;
 
   for (const frame of [elements.compareLeftFrame, elements.compareRightFrame]) {
-    const target = frame.contentDocument?.querySelector(`[data-hce-hunk="${hunk.id}"]`);
-    target?.scrollIntoView({ behavior: 'auto', block: 'center' });
+    centerFrameOnHunk(frame, hunk.id);
   }
 
   window.requestAnimationFrame(() => {
@@ -769,6 +768,25 @@ function navigateDifference(delta) {
   const hunks = currentHunks();
   if (hunks.length === 0) return;
   setActiveDifference(state.activeDifferenceIndex + delta, true);
+}
+
+function centerFrameOnHunk(frame, hunkId) {
+  const doc = frame.contentDocument;
+  const scroller = scrollingElement(frame);
+  if (!doc || !scroller) return;
+
+  const nodes = [...doc.querySelectorAll(`[data-hce-hunk="${hunkId}"]`)];
+  if (nodes.length === 0) return;
+
+  const tops = nodes.map((node) => node.getBoundingClientRect().top + scroller.scrollTop);
+  const bottoms = nodes.map((node) => node.getBoundingClientRect().bottom + scroller.scrollTop);
+  const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+
+  scroller.scrollTop = Math.max(
+    0,
+    Math.min(maxTop, center - scroller.clientHeight / 2)
+  );
 }
 
 function scrollingElement(frame) {
