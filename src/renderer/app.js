@@ -365,22 +365,6 @@ function wireEditableFrame() {
     });
 
     editable.addEventListener('keydown', (event) => {
-      const modifier = event.ctrlKey || event.metaKey;
-
-      if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
-        event.preventDefault();
-        editable.blur();
-        void state.pendingCompareCommit.then(() => undoCompare());
-        return;
-      }
-
-      if (modifier && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
-        event.preventDefault();
-        editable.blur();
-        void state.pendingCompareCommit.then(() => redoCompare());
-        return;
-      }
-
       if (event.key === 'Escape') {
         editable.textContent = editable.dataset.hceBefore ?? editable.textContent;
         editable.blur();
@@ -1155,6 +1139,22 @@ function wireCompareFrame(side) {
     });
 
     editable.addEventListener('keydown', (event) => {
+      const modifier = event.ctrlKey || event.metaKey;
+
+      if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        editable.blur();
+        void state.pendingCompareCommit.then(() => undoCompare());
+        return;
+      }
+
+      if (modifier && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+        event.preventDefault();
+        editable.blur();
+        void state.pendingCompareCommit.then(() => redoCompare());
+        return;
+      }
+
       if (event.key === 'Escape') {
         editable.textContent = editable.dataset.hceBefore ?? editable.textContent;
         editable.blur();
