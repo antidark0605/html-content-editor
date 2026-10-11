@@ -365,6 +365,22 @@ function wireEditableFrame() {
     });
 
     editable.addEventListener('keydown', (event) => {
+      const modifier = event.ctrlKey || event.metaKey;
+
+      if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        editable.blur();
+        void state.pendingCompareCommit.then(() => undoCompare());
+        return;
+      }
+
+      if (modifier && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+        event.preventDefault();
+        editable.blur();
+        void state.pendingCompareCommit.then(() => redoCompare());
+        return;
+      }
+
       if (event.key === 'Escape') {
         editable.textContent = editable.dataset.hceBefore ?? editable.textContent;
         editable.blur();
@@ -1114,7 +1130,6 @@ async function flushCompareEdits() {
     const active = frame.contentDocument?.activeElement;
 
     if (active?.matches?.('[data-hce-compare-id]')) {
-      await queueCompareCommit(side, active);
       active.blur();
     }
   }
@@ -1427,7 +1442,7 @@ async function undoCompare() {
   }
 
   applyCompareResult(result, { keepIndex: true });
-  showToast('Merge undone.');
+  showToast('Compare change undone.');
 }
 
 async function redoCompare() {
@@ -1439,7 +1454,7 @@ async function redoCompare() {
   }
 
   applyCompareResult(result, { keepIndex: true });
-  showToast('Merge redone.');
+  showToast('Compare change redone.');
 }
 
 async function mergeDifference(direction, explicitHunkId = null) {
@@ -1485,6 +1500,8 @@ function loadSession(session) {
   state.redoStack = [];
   state.searchMatches = [];
   state.searchIndex = -1;
+  state.editorDiffAnalysis = null;
+  state.activeEditorDiffIndex = 0;
 
   refreshWorkspaceVisibility();
   elements.fileName.textContent = session.fileName;
@@ -1658,6 +1675,8 @@ elements.saveButton.addEventListener('click', save);
 elements.saveAsButton.addEventListener('click', saveAs);
 elements.undoButton.addEventListener('click', undo);
 elements.redoButton.addEventListener('click', redo);
+elements.editorPreviousDifferenceButton.addEventListener('click', () => navigateEditorDiff(-1));
+elements.editorNextDifferenceButton.addEventListener('click', () => navigateEditorDiff(1));
 
 for (const button of elements.modeButtons) {
   button.addEventListener('click', () => void setMode(button.dataset.mode));
@@ -1671,6 +1690,18 @@ elements.searchNextButton.addEventListener('click', () => runSearch(true));
 
 document.addEventListener('keydown', (event) => {
   const modifier = event.ctrlKey || event.metaKey;
+
+  if (state.workspaceMode === 'editor' && state.mode === 'diff' && modifier && event.altKey && event.key === 'ArrowDown') {
+    event.preventDefault();
+    navigateEditorDiff(1);
+    return;
+  }
+
+  if (state.workspaceMode === 'editor' && state.mode === 'diff' && modifier && event.altKey && event.key === 'ArrowUp') {
+    event.preventDefault();
+    navigateEditorDiff(-1);
+    return;
+  }
 
   if (state.workspaceMode === 'compare' && modifier && event.altKey && event.key === 'ArrowDown') {
     event.preventDefault();
@@ -1759,8 +1790,10 @@ refreshWorkspaceVisibility();
 
 Promise.all([
   window.hce.getSession(),
-  window.hce.getCompareState()
-]).then(([existing, compare]) => {
+  window.hce.getCompareState(),
+  window.hce.getAppVersion()
+]).then(([existing, compare, version]) => {
+  elements.appVersion.textContent = `v${version}`;
   if (existing) loadSession(existing);
 
   if (compare?.state && (compare.state.left || compare.state.right)) {
