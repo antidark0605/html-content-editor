@@ -38,7 +38,7 @@ async function editTextNode(frame, selector, replacement) {
 }
 
 function historyCount(text, name) {
-  const match = new RegExp(`${name} \\(\\d+\\)`).exec(text ?? '');
+  const match = new RegExp(`${name} \\((\\d+)\\)`).exec(text ?? '');
   return match ? Number(match[1]) : 0;
 }
 
