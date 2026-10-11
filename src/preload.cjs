@@ -1,7 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('hce', {
   openHtml: () => ipcRenderer.invoke('file:open'),
+  openDroppedHtml: (target, filePath) => ipcRenderer.invoke('file:open-dropped', target, filePath),
+  getDroppedFilePath: (file) => webUtils.getPathForFile(file),
   openCompare: (side) => ipcRenderer.invoke('compare:open', side),
   reloadCompare: (side) => ipcRenderer.invoke('compare:reload', side),
   swapCompare: () => ipcRenderer.invoke('compare:swap'),
@@ -18,5 +20,7 @@ contextBridge.exposeInMainWorld('hce', {
   diff: (workingSource) => ipcRenderer.invoke('html:diff', workingSource),
   diffAnalysis: (workingSource) => ipcRenderer.invoke('html:diff-analysis', workingSource),
   getSession: () => ipcRenderer.invoke('app:get-session'),
-  getAppVersion: () => ipcRenderer.invoke('app:get-version')
+  getAppInfo: () => ipcRenderer.invoke('app:get-info'),
+  copyPath: (target) => ipcRenderer.invoke('app:copy-path', target),
+  openLink: (target) => ipcRenderer.invoke('app:open-link', target)
 });
