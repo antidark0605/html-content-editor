@@ -369,6 +369,12 @@ function wireEditableFrame() {
   const doc = elements.pageFrame.contentDocument;
   if (!doc) return;
 
+  doc.addEventListener('dragenter', (event) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    showDropOverlay();
+  }, true);
+
   doc.addEventListener(
     'click',
     (event) => {
@@ -1151,6 +1157,12 @@ function wireCompareFrame(side) {
 
   state.compareFrameReady[side] = true;
   applyCompareZoom(frame);
+
+  doc.addEventListener('dragenter', (event) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    showDropOverlay();
+  }, true);
 
   for (const editable of doc.querySelectorAll('[data-hce-compare-id]')) {
     editable.setAttribute('contenteditable', 'plaintext-only');
