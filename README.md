@@ -48,7 +48,7 @@ Windows builds are currently unsigned, so Microsoft SmartScreen may warn when la
 
 ## Open-directory behavior
 
-The app remembers the most recently opened directory in its local settings. It does not blindly trust that path.
+The app remembers the most recently opened directory in Electron's per-user `userData/settings.json`. It does not blindly trust that path.
 
 For Editor Open, the preference order is:
 
@@ -87,7 +87,7 @@ Source Compare provides an Araxis/WinMerge/Meld-style aligned text view:
 - overview rail whose marker position reflects each diff's real document position
 - Save button and unsaved indicator for each side
 
-Source merge copies the selected source hunk exactly, so it can also handle HTML structure, attributes, CSS, and inserted/deleted lines.
+Source merge copies the selected source hunk exactly, so it can also handle HTML structure, attributes, CSS, and inserted/deleted lines. Source Compare remains intentionally read-only for direct typing; use Visual Compare for text editing and Source Compare for precise structural merge operations.
 
 JavaScript remains disabled in Visual Compare. Relative CSS/images are resolved from each HTML file's own directory.
 
@@ -104,7 +104,7 @@ The first version focuses on static HTML content. It intentionally does not edit
 - `<option>`
 - SVG / MathML / canvas content
 
-Pages whose visible content is generated only by JavaScript will not expose that generated text for editing in v0.1.
+Pages whose visible content is generated only by JavaScript will not expose that generated text for editing in v0.5.
 
 The Edit view temporarily wraps editable text in helper spans, so a page with unusually strict CSS selectors may look slightly different while editing. **Preview does not contain those wrappers**, and is the authoritative layout check before saving.
 
