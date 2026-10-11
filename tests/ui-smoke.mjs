@@ -335,6 +335,42 @@ try {
   const editorRailCount = await page.locator('#editorDiffRail button').count();
   assert.ok(editorRailCount >= 2, 'Expected multiple editor diff rail markers');
 
+  const editorRailValidation = await page.evaluate(() => {
+    const panel = document.querySelector('#diffPanel');
+    const markers = [...document.querySelectorAll('#editorDiffRail button')];
+    const hunkIds = [];
+
+    for (const row of panel.querySelectorAll('[data-editor-hunk-id]')) {
+      const id = row.dataset.editorHunkId;
+      if (id && !hunkIds.includes(id)) hunkIds.push(id);
+    }
+
+    const panelRect = panel.getBoundingClientRect();
+
+    return hunkIds.map((id, index) => {
+      const rows = [...panel.querySelectorAll(`[data-editor-hunk-id="${id}"]`)];
+      const tops = rows.map(
+        (row) => row.getBoundingClientRect().top - panelRect.top + panel.scrollTop
+      );
+      const bottoms = rows.map(
+        (row) => row.getBoundingClientRect().bottom - panelRect.top + panel.scrollTop
+      );
+      const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+      return {
+        expected: center / panel.scrollHeight * 100,
+        actual: Number.parseFloat(markers[index]?.style.top ?? 'NaN')
+      };
+    });
+  });
+
+  for (const { expected, actual } of editorRailValidation) {
+    assert.ok(Number.isFinite(actual));
+    assert.ok(
+      Math.abs(actual - expected) < 3,
+      `Editor diff rail marker is not tied to the rendered diff: expected ${expected}, got ${actual}`
+    );
+  }
+
   const firstEditorDiffCount = await page.locator('#editorDifferenceCount').textContent();
   await page.locator('#editorNextDifferenceButton').click();
   await page.waitForFunction((before) =>
