@@ -383,6 +383,11 @@ try {
     path: path.join(outputDir, 'editor-diff.png'),
     fullPage: true
   });
+
+  await page.locator('#saveButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#dirtyBadge')?.classList.contains('hidden')
+  );
 } finally {
   await electronApp.close();
   await fs.rm(tempDir, { recursive: true, force: true });
