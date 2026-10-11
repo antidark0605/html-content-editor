@@ -10,9 +10,11 @@ import {
 } from './html-model.mjs';
 import {
   buildCompareAnalysis,
+  buildSourceComparison,
   mergeSourceHunk,
   mergeVisibleTextHunk
 } from './compare-model.mjs';
+import { firstUsableDirectory } from './open-path.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,7 +23,86 @@ let session = null;
 let compareSlots = { left: null, right: null };
 let compareUndoStack = [];
 let compareRedoStack = [];
+let settings = {};
 let allowClose = false;
+
+function settingsFilePath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+async function loadSettings() {
+  try {
+    const raw = await fsp.readFile(settingsFilePath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    settings = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('Failed to read settings:', error);
+    }
+    settings = {};
+  }
+}
+
+async function persistSettings() {
+  try {
+    await fsp.mkdir(app.getPath('userData'), { recursive: true });
+    await fsp.writeFile(settingsFilePath(), JSON.stringify(settings, null, 2), 'utf8');
+  } catch (error) {
+    console.warn('Failed to save settings:', error);
+  }
+}
+
+async function rememberOpenDirectory(filePath) {
+  if (typeof filePath !== 'string' || filePath.length === 0) return;
+  settings.lastOpenDirectory = path.dirname(filePath);
+  await persistSettings();
+}
+
+function safeAppPath(name) {
+  try {
+    return app.getPath(name);
+  } catch {
+    return null;
+  }
+}
+
+function directoryOf(filePath) {
+  return typeof filePath === 'string' && filePath.length > 0
+    ? path.dirname(filePath)
+    : null;
+}
+
+async function resolveOpenDirectory(kind, side = null) {
+  const candidates = kind === 'compare'
+    ? [
+        directoryOf(compareSlots[side === 'left' ? 'right' : 'left']?.filePath),
+        directoryOf(compareSlots[side]?.filePath),
+        settings.lastOpenDirectory,
+        directoryOf(session?.filePath),
+        safeAppPath('documents'),
+        safeAppPath('home')
+      ]
+    : [
+        directoryOf(session?.filePath),
+        settings.lastOpenDirectory,
+        safeAppPath('documents'),
+        safeAppPath('home')
+      ];
+
+  return firstUsableDirectory(candidates, { timeoutMs: 1000 });
+}
+
+function openDialogOptions(title, defaultPath) {
+  return {
+    title,
+    properties: ['openFile'],
+    filters: [
+      { name: 'HTML files', extensions: ['html', 'htm'] },
+      { name: 'All files', extensions: ['*'] }
+    ],
+    ...(defaultPath ? { defaultPath } : {})
+  };
+}
 
 function baseHrefFor(filePath) {
   return pathToFileURL(`${path.dirname(filePath)}${path.sep}`).href;
@@ -256,6 +337,13 @@ function startupArg(name) {
   return arg ? arg.slice(prefix.length) : null;
 }
 
+async function loadStartupEditorFile() {
+  const editorFile = startupArg('editor-file');
+  if (editorFile && fs.existsSync(editorFile)) {
+    await readHtmlFile(editorFile);
+  }
+}
+
 async function loadStartupCompareFiles() {
   const left = startupArg('compare-left');
   const right = startupArg('compare-right');
@@ -270,7 +358,7 @@ async function createWindow() {
     height: 900,
     minWidth: 960,
     minHeight: 650,
-    title: 'HTML Content Editor',
+    title: `HTML Content Editor v${app.getVersion()}`,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -303,21 +391,21 @@ async function createWindow() {
 ipcMain.handle('file:open', async () => {
   if (!confirmEditorDiscardOrSave()) return { cancelled: true };
 
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Open HTML file',
-    properties: ['openFile'],
-    filters: [
-      { name: 'HTML files', extensions: ['html', 'htm'] },
-      { name: 'All files', extensions: ['*'] }
-    ]
-  });
+  const defaultPath = await resolveOpenDirectory('editor');
+  const result = await dialog.showOpenDialog(
+    mainWindow,
+    openDialogOptions('Open HTML file', defaultPath)
+  );
 
   if (result.canceled || result.filePaths.length === 0) {
     return { cancelled: true };
   }
 
   try {
-    return { cancelled: false, session: await readHtmlFile(result.filePaths[0]) };
+    const filePath = result.filePaths[0];
+    const payload = await readHtmlFile(filePath);
+    await rememberOpenDirectory(filePath);
+    return { cancelled: false, session: payload };
   } catch (error) {
     return {
       cancelled: true,
@@ -330,23 +418,26 @@ ipcMain.handle('compare:open', async (_event, requestedSide) => {
   const side = normalizeCompareSide(requestedSide);
   if (!confirmCompareDiscardOrSave(side)) return { cancelled: true };
 
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: side === 'left' ? 'Open left HTML file' : 'Open right HTML file',
-    properties: ['openFile'],
-    filters: [
-      { name: 'HTML files', extensions: ['html', 'htm'] },
-      { name: 'All files', extensions: ['*'] }
-    ]
-  });
+  const defaultPath = await resolveOpenDirectory('compare', side);
+  const result = await dialog.showOpenDialog(
+    mainWindow,
+    openDialogOptions(
+      side === 'left' ? 'Open left HTML file' : 'Open right HTML file',
+      defaultPath
+    )
+  );
 
   if (result.canceled || result.filePaths.length === 0) {
     return { cancelled: true };
   }
 
   try {
+    const filePath = result.filePaths[0];
+    const page = await readCompareFile(side, filePath);
+    await rememberOpenDirectory(filePath);
     return {
       cancelled: false,
-      page: await readCompareFile(side, result.filePaths[0]),
+      page,
       ...compareResultPayload()
     };
   } catch (error) {
@@ -389,6 +480,41 @@ ipcMain.handle('compare:swap', async () => {
 ipcMain.handle('compare:get-state', async () => compareResultPayload());
 
 ipcMain.handle('compare:analyze', async () => compareAnalysisPayload());
+
+ipcMain.handle('compare:edit-text', async (_event, requestedSide, nodeId, value) => {
+  const side = normalizeCompareSide(requestedSide);
+  const slot = compareSlots[side];
+
+  if (!slot) {
+    return { ok: false, reason: 'No comparison file is open on this side.' };
+  }
+
+  if (typeof nodeId !== 'string' || typeof value !== 'string') {
+    return { ok: false, reason: 'Invalid compare text edit.' };
+  }
+
+  const textNodes = extractEditableTextNodes(slot.working);
+  const node = textNodes.find((candidate) => candidate.id === nodeId);
+
+  if (!node) {
+    return { ok: false, reason: 'The edited text block no longer exists. Reload the comparison.' };
+  }
+
+  if (node.text === value) {
+    return { ok: true, ...compareResultPayload() };
+  }
+
+  compareUndoStack.push(compareSnapshot());
+  compareRedoStack = [];
+
+  slot.working = applyTextEdits(slot.working, textNodes, { [nodeId]: value });
+  slot.dirty = slot.working !== slot.original;
+
+  return {
+    ok: true,
+    ...compareResultPayload()
+  };
+});
 
 ipcMain.handle('compare:merge', async (_event, mode, hunkId, direction) => {
   if (!compareSlots.left || !compareSlots.right) {
@@ -500,9 +626,20 @@ ipcMain.handle('file:save-as', async (_event, workingSource) => {
   if (typeof workingSource !== 'string') throw new Error('Invalid HTML content.');
 
   const parsed = path.parse(session.filePath);
+  const saveDirectory = await firstUsableDirectory(
+    [
+      parsed.dir,
+      settings.lastOpenDirectory,
+      safeAppPath('documents'),
+      safeAppPath('home')
+    ],
+    { timeoutMs: 1000 }
+  );
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Save HTML As',
-    defaultPath: path.join(parsed.dir, parsed.name + parsed.ext),
+    defaultPath: saveDirectory
+      ? path.join(saveDirectory, parsed.name + parsed.ext)
+      : parsed.name + parsed.ext,
     filters: [
       { name: 'HTML files', extensions: ['html', 'htm'] },
       { name: 'All files', extensions: ['*'] }
@@ -514,6 +651,7 @@ ipcMain.handle('file:save-as', async (_event, workingSource) => {
   }
 
   await fsp.writeFile(result.filePath, workingSource, 'utf8');
+  await rememberOpenDirectory(result.filePath);
   return {
     cancelled: false,
     session: makeSession(result.filePath, workingSource)
@@ -531,9 +669,17 @@ ipcMain.handle('html:diff', async (_event, workingSource) => {
   }));
 });
 
+ipcMain.handle('html:diff-analysis', async (_event, workingSource) => {
+  if (!session) return null;
+  return buildSourceComparison(session.original, workingSource ?? session.working);
+});
+
 ipcMain.handle('app:get-session', async () => sessionPayload());
+ipcMain.handle('app:get-version', async () => app.getVersion());
 
 app.whenReady().then(async () => {
+  await loadSettings();
+  await loadStartupEditorFile();
   await loadStartupCompareFiles();
   await createWindow();
 
