@@ -605,6 +605,9 @@ async function setWorkspaceMode(mode) {
   if (state.workspaceMode === 'editor' && mode !== 'editor' && state.session) {
     await flushPendingEdits();
   }
+  if (state.workspaceMode === 'compare' && mode !== 'compare') {
+    await flushCompareEdits();
+  }
 
   state.workspaceMode = mode;
   refreshWorkspaceVisibility();
@@ -1078,6 +1081,47 @@ function onVisualScroll(side) {
   scheduleVisualMergeGutter();
 }
 
+async function commitCompareEditable(side, editable) {
+  if (!editable?.matches?.('[data-hce-compare-id]')) return;
+
+  const nodeId = editable.dataset.hceCompareId;
+  const before = editable.dataset.hceBefore ?? '';
+  const after = editable.textContent ?? before;
+
+  if (after === before) return;
+
+  const result = await window.hce.editCompareText(side, nodeId, after);
+  if (!result.ok) {
+    editable.textContent = before;
+    showToast(result.reason);
+    return;
+  }
+
+  applyCompareResult(result, { keepIndex: true });
+}
+
+function queueCompareCommit(side, editable) {
+  state.pendingCompareCommit = state.pendingCompareCommit
+    .catch(() => {})
+    .then(() => commitCompareEditable(side, editable));
+
+  return state.pendingCompareCommit;
+}
+
+async function flushCompareEdits() {
+  for (const side of ['left', 'right']) {
+    const { frame } = compareElementsFor(side);
+    const active = frame.contentDocument?.activeElement;
+
+    if (active?.matches?.('[data-hce-compare-id]')) {
+      await queueCompareCommit(side, active);
+      active.blur();
+    }
+  }
+
+  await state.pendingCompareCommit;
+}
+
 function wireCompareFrame(side) {
   const { frame } = compareElementsFor(side);
   const doc = frame.contentDocument;
@@ -1086,6 +1130,31 @@ function wireCompareFrame(side) {
 
   state.compareFrameReady[side] = true;
   applyCompareZoom(frame);
+
+  for (const editable of doc.querySelectorAll('[data-hce-compare-id]')) {
+    editable.setAttribute('contenteditable', 'plaintext-only');
+    editable.setAttribute('spellcheck', 'false');
+
+    editable.addEventListener('focus', () => {
+      editable.dataset.hceBefore = editable.textContent ?? '';
+    });
+
+    editable.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        editable.textContent = editable.dataset.hceBefore ?? editable.textContent;
+        editable.blur();
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        editable.blur();
+      }
+    });
+
+    editable.addEventListener('blur', () => {
+      void queueCompareCommit(side, editable);
+    });
+  }
 
   doc.addEventListener('click', (event) => {
     const anchor = event.target.closest?.('a');
@@ -1272,8 +1341,9 @@ function renderCompare() {
   updateDifferenceControls();
 }
 
-function setCompareView(view) {
+async function setCompareView(view) {
   if (view !== 'visual' && view !== 'source') return;
+  if (state.compareView === 'visual') await flushCompareEdits();
   state.compareView = view;
   state.activeDifferenceIndex = 0;
   renderCompare();
@@ -1302,6 +1372,7 @@ function applyCompareResult(result, options = {}) {
 }
 
 async function openCompare(side) {
+  await flushCompareEdits();
   const result = await window.hce.openCompare(side);
   if (result.error) {
     showToast('Open failed: ' + result.error);
@@ -1312,6 +1383,7 @@ async function openCompare(side) {
 }
 
 async function reloadCompare(side) {
+  await flushCompareEdits();
   const result = await window.hce.reloadCompare(side);
   if (result.error) {
     showToast('Reload failed: ' + result.error);
@@ -1325,11 +1397,13 @@ async function reloadCompare(side) {
 }
 
 async function swapCompare() {
+  await flushCompareEdits();
   const result = await window.hce.swapCompare();
   applyCompareResult(result);
 }
 
 async function saveCompare(side) {
+  await flushCompareEdits();
   const result = await window.hce.saveCompare(side);
   if (!result.ok) {
     showToast('Save failed: ' + result.reason);
@@ -1345,6 +1419,7 @@ async function saveCompare(side) {
 }
 
 async function undoCompare() {
+  await flushCompareEdits();
   const result = await window.hce.undoCompare();
   if (!result.ok) {
     showToast(result.reason);
@@ -1356,6 +1431,7 @@ async function undoCompare() {
 }
 
 async function redoCompare() {
+  await flushCompareEdits();
   const result = await window.hce.redoCompare();
   if (!result.ok) {
     showToast(result.reason);
@@ -1367,6 +1443,7 @@ async function redoCompare() {
 }
 
 async function mergeDifference(direction, explicitHunkId = null) {
+  await flushCompareEdits();
   const hunk = explicitHunkId
     ? currentHunks().find((candidate) => candidate.id === explicitHunkId)
     : activeHunk();
@@ -1554,7 +1631,7 @@ for (const button of elements.workspaceModeButtons) {
 }
 
 for (const button of elements.compareViewButtons) {
-  button.addEventListener('click', () => setCompareView(button.dataset.compareView));
+  button.addEventListener('click', () => void setCompareView(button.dataset.compareView));
 }
 
 elements.openCompareLeftButton.addEventListener('click', () => void openCompare('left'));
