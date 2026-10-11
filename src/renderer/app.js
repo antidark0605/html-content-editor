@@ -8,6 +8,16 @@ import {
 
 const elements = {
   appVersion: document.querySelector('#appVersion'),
+  aboutButton: document.querySelector('#aboutButton'),
+  aboutDialog: document.querySelector('#aboutDialog'),
+  closeAboutButton: document.querySelector('#closeAboutButton'),
+  aboutVersion: document.querySelector('#aboutVersion'),
+  aboutBuild: document.querySelector('#aboutBuild'),
+  aboutElectron: document.querySelector('#aboutElectron'),
+  aboutChrome: document.querySelector('#aboutChrome'),
+  aboutNode: document.querySelector('#aboutNode'),
+  aboutPlatform: document.querySelector('#aboutPlatform'),
+  aboutLinkButtons: [...document.querySelectorAll('[data-about-link]')],
   openButton: document.querySelector('#openButton'),
   welcomeOpenButton: document.querySelector('#welcomeOpenButton'),
   saveButton: document.querySelector('#saveButton'),
@@ -31,6 +41,7 @@ const elements = {
   workspace: document.querySelector('#workspace'),
   fileName: document.querySelector('#fileName'),
   dirtyBadge: document.querySelector('#dirtyBadge'),
+  copyEditorPathButton: document.querySelector('#copyEditorPathButton'),
   editorModeHint: document.querySelector('#editorModeHint'),
   editableCount: document.querySelector('#editableCount'),
   scriptWarning: document.querySelector('#scriptWarning'),
@@ -57,6 +68,8 @@ const elements = {
   reloadCompareRightButton: document.querySelector('#reloadCompareRightButton'),
   saveCompareLeftButton: document.querySelector('#saveCompareLeftButton'),
   saveCompareRightButton: document.querySelector('#saveCompareRightButton'),
+  copyCompareLeftPathButton: document.querySelector('#copyCompareLeftPathButton'),
+  copyCompareRightPathButton: document.querySelector('#copyCompareRightPathButton'),
   swapCompareButton: document.querySelector('#swapCompareButton'),
   previousDifferenceButton: document.querySelector('#previousDifferenceButton'),
   nextDifferenceButton: document.querySelector('#nextDifferenceButton'),
@@ -72,6 +85,10 @@ const elements = {
   zoomInButton: document.querySelector('#zoomInButton'),
   zoomLabel: document.querySelector('#zoomLabel'),
   modeButtons: [...document.querySelectorAll('[data-mode]')],
+  dropOverlay: document.querySelector('#dropOverlay'),
+  dropEditorLayout: document.querySelector('#dropEditorLayout'),
+  dropCompareLayout: document.querySelector('#dropCompareLayout'),
+  dropZones: [...document.querySelectorAll('[data-drop-target]')],
   toast: document.querySelector('#toast')
 };
 
@@ -102,7 +119,8 @@ const state = {
   scrollDriverTimer: null,
   programmaticUntil: { left: 0, right: 0 },
   pendingInitialDifferenceScroll: false,
-  visualCenterGeneration: 0
+  visualCenterGeneration: 0,
+  appInfo: null
 };
 
 function escapeHtmlText(value) {
@@ -623,7 +641,8 @@ function compareElementsFor(side) {
       dirty: elements.compareLeftDirty,
       warning: elements.compareLeftScriptWarning,
       reload: elements.reloadCompareLeftButton,
-      save: elements.saveCompareLeftButton
+      save: elements.saveCompareLeftButton,
+      copyPath: elements.copyCompareLeftPathButton
     };
   }
 
@@ -633,7 +652,8 @@ function compareElementsFor(side) {
     dirty: elements.compareRightDirty,
     warning: elements.compareRightScriptWarning,
     reload: elements.reloadCompareRightButton,
-    save: elements.saveCompareRightButton
+    save: elements.saveCompareRightButton,
+    copyPath: elements.copyCompareRightPathButton
   };
 }
 
@@ -646,6 +666,7 @@ function updateCompareHeader(side) {
   controls.warning.classList.toggle('hidden', !page?.hasScripts || state.compareView === 'source');
   controls.reload.disabled = !page;
   controls.save.disabled = !page?.dirty;
+  controls.copyPath.disabled = !page;
 }
 
 function currentHunks() {
@@ -1496,6 +1517,98 @@ function setCompareZoom(nextZoom) {
   });
 }
 
+function showAbout() {
+  if (!state.appInfo) return;
+
+  elements.aboutVersion.textContent = `Version ${state.appInfo.version}`;
+  elements.aboutBuild.textContent = `Build ${state.appInfo.buildCommit}`;
+  elements.aboutElectron.textContent = state.appInfo.electron;
+  elements.aboutChrome.textContent = state.appInfo.chrome;
+  elements.aboutNode.textContent = state.appInfo.node;
+  elements.aboutPlatform.textContent =
+    `${state.appInfo.platform} ${state.appInfo.arch} · ${state.appInfo.osRelease}`;
+
+  if (!elements.aboutDialog.open) {
+    elements.aboutDialog.showModal();
+  }
+}
+
+async function copyCurrentPath(target) {
+  const result = await window.hce.copyPath(target);
+  if (!result.ok) {
+    showToast(result.reason);
+    return;
+  }
+
+  showToast('File path copied.');
+}
+
+function isFileDrag(event) {
+  return [...(event.dataTransfer?.types ?? [])].includes('Files');
+}
+
+function showDropOverlay() {
+  elements.dropEditorLayout.classList.toggle('hidden', state.workspaceMode !== 'editor');
+  elements.dropCompareLayout.classList.toggle('hidden', state.workspaceMode !== 'compare');
+  elements.dropOverlay.classList.remove('hidden');
+  elements.dropOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function hideDropOverlay() {
+  elements.dropOverlay.classList.add('hidden');
+  elements.dropOverlay.setAttribute('aria-hidden', 'true');
+  for (const zone of elements.dropZones) {
+    zone.classList.remove('drag-over');
+  }
+}
+
+async function handleDroppedFile(target, file) {
+  hideDropOverlay();
+
+  if (!file) {
+    showToast('No file was dropped.');
+    return;
+  }
+
+  let filePath = '';
+  try {
+    filePath = window.hce.getDroppedFilePath(file);
+  } catch {
+    filePath = '';
+  }
+
+  if (!filePath) {
+    showToast('Could not read the dropped file path.');
+    return;
+  }
+
+  if (target === 'editor') {
+    await flushPendingEdits();
+  } else {
+    await flushCompareEdits();
+  }
+
+  const result = await window.hce.openDroppedHtml(target, filePath);
+
+  if (!result.ok) {
+    if (!result.cancelled) showToast(`Drop failed: ${result.reason}`);
+    return;
+  }
+
+  if (target === 'editor') {
+    state.workspaceMode = 'editor';
+    loadSession(result.session);
+    refreshWorkspaceVisibility();
+    showToast('HTML opened in Editor.');
+    return;
+  }
+
+  state.workspaceMode = 'compare';
+  refreshWorkspaceVisibility();
+  applyCompareResult(result);
+  showToast(`HTML opened as ${target === 'left' ? 'Left' : 'Right'}.`);
+}
+
 function loadSession(session) {
   state.session = session;
   state.edits = {};
@@ -1513,6 +1626,7 @@ function loadSession(session) {
   elements.editableCount.textContent = `${session.textNodes.length} editable text block${session.textNodes.length === 1 ? '' : 's'}`;
   elements.scriptWarning.classList.toggle('hidden', !session.hasScripts);
   elements.saveAsButton.disabled = false;
+  elements.copyEditorPathButton.disabled = false;
   elements.searchInput.disabled = false;
   elements.searchInput.value = '';
   elements.searchCount.textContent = '';
@@ -1656,7 +1770,9 @@ for (const button of elements.compareViewButtons) {
 }
 
 elements.openCompareLeftButton.addEventListener('click', () => void openCompare('left'));
+elements.copyCompareLeftPathButton.addEventListener('click', () => void copyCurrentPath('left'));
 elements.openCompareRightButton.addEventListener('click', () => void openCompare('right'));
+elements.copyCompareRightPathButton.addEventListener('click', () => void copyCurrentPath('right'));
 elements.reloadCompareLeftButton.addEventListener('click', () => void reloadCompare('left'));
 elements.reloadCompareRightButton.addEventListener('click', () => void reloadCompare('right'));
 elements.saveCompareLeftButton.addEventListener('click', () => void saveCompare('left'));
@@ -1675,6 +1791,15 @@ elements.zoomInButton.addEventListener('click', () => setCompareZoom(state.compa
 
 elements.openButton.addEventListener('click', openHtml);
 elements.welcomeOpenButton.addEventListener('click', openHtml);
+elements.copyEditorPathButton.addEventListener('click', () => void copyCurrentPath('editor'));
+elements.aboutButton.addEventListener('click', showAbout);
+elements.closeAboutButton.addEventListener('click', () => elements.aboutDialog.close());
+elements.aboutDialog.addEventListener('click', (event) => {
+  if (event.target === elements.aboutDialog) elements.aboutDialog.close();
+});
+for (const button of elements.aboutLinkButtons) {
+  button.addEventListener('click', () => void window.hce.openLink(button.dataset.aboutLink));
+}
 elements.saveButton.addEventListener('click', save);
 elements.saveAsButton.addEventListener('click', saveAs);
 elements.undoButton.addEventListener('click', undo);
@@ -1691,6 +1816,61 @@ elements.searchInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') runSearch(true);
 });
 elements.searchNextButton.addEventListener('click', () => runSearch(true));
+
+document.addEventListener('dragenter', (event) => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  showDropOverlay();
+});
+
+document.addEventListener('dragover', (event) => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+});
+
+elements.dropOverlay.addEventListener('dragleave', (event) => {
+  if (!event.relatedTarget || !elements.dropOverlay.contains(event.relatedTarget)) {
+    hideDropOverlay();
+  }
+});
+
+for (const zone of elements.dropZones) {
+  zone.addEventListener('dragenter', (event) => {
+    event.preventDefault();
+    zone.classList.add('drag-over');
+  });
+
+  zone.addEventListener('dragleave', () => {
+    zone.classList.remove('drag-over');
+  });
+
+  zone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+
+  zone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const files = [...(event.dataTransfer?.files ?? [])];
+    if (files.length !== 1) {
+      hideDropOverlay();
+      showToast('Drop one HTML file at a time.');
+      return;
+    }
+
+    void handleDroppedFile(zone.dataset.dropTarget, files[0]);
+  });
+}
+
+document.addEventListener('drop', (event) => {
+  if (!elements.dropOverlay.contains(event.target)) {
+    event.preventDefault();
+    hideDropOverlay();
+  }
+});
 
 document.addEventListener('keydown', (event) => {
   const modifier = event.ctrlKey || event.metaKey;
@@ -1795,9 +1975,10 @@ refreshWorkspaceVisibility();
 Promise.all([
   window.hce.getSession(),
   window.hce.getCompareState(),
-  window.hce.getAppVersion()
-]).then(([existing, compare, version]) => {
-  elements.appVersion.textContent = `v${version}`;
+  window.hce.getAppInfo()
+]).then(([existing, compare, appInfo]) => {
+  state.appInfo = appInfo;
+  elements.appVersion.textContent = `v${appInfo.version}`;
   if (existing) loadSession(existing);
 
   if (compare?.state && (compare.state.left || compare.state.right)) {
