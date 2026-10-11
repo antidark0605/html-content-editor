@@ -7,6 +7,7 @@ import {
 } from '../compare-utils.mjs';
 
 const elements = {
+  appVersion: document.querySelector('#appVersion'),
   openButton: document.querySelector('#openButton'),
   welcomeOpenButton: document.querySelector('#welcomeOpenButton'),
   saveButton: document.querySelector('#saveButton'),
@@ -21,15 +22,22 @@ const elements = {
   searchInput: document.querySelector('#searchInput'),
   searchNextButton: document.querySelector('#searchNextButton'),
   searchCount: document.querySelector('#searchCount'),
+  editorDiffNav: document.querySelector('#editorDiffNav'),
+  editorPreviousDifferenceButton: document.querySelector('#editorPreviousDifferenceButton'),
+  editorNextDifferenceButton: document.querySelector('#editorNextDifferenceButton'),
+  editorDifferenceCount: document.querySelector('#editorDifferenceCount'),
   welcome: document.querySelector('#welcome'),
   workspace: document.querySelector('#workspace'),
   fileName: document.querySelector('#fileName'),
   dirtyBadge: document.querySelector('#dirtyBadge'),
+  editorModeHint: document.querySelector('#editorModeHint'),
   editableCount: document.querySelector('#editableCount'),
   scriptWarning: document.querySelector('#scriptWarning'),
   frameHost: document.querySelector('#frameHost'),
   pageFrame: document.querySelector('#pageFrame'),
+  diffHost: document.querySelector('#diffHost'),
   diffPanel: document.querySelector('#diffPanel'),
+  editorDiffRail: document.querySelector('#editorDiffRail'),
   compareWorkspace: document.querySelector('#compareWorkspace'),
   visualCompare: document.querySelector('#visualCompare'),
   sourceCompare: document.querySelector('#sourceCompare'),
@@ -76,6 +84,9 @@ const state = {
   searchMatches: [],
   searchIndex: -1,
   pendingCommit: Promise.resolve(),
+  editorDiffAnalysis: null,
+  activeEditorDiffIndex: 0,
+  pendingCompareCommit: Promise.resolve(),
   workspaceMode: 'editor',
   compare: { left: null, right: null },
   compareAnalysis: null,
@@ -158,8 +169,18 @@ function editorStyle() {
 function compareStyle() {
   return `<style data-hce-compare-style>
     .hce-compare-node {
+      cursor: text !important;
       border-radius: 2px !important;
+      outline: 1px dashed transparent !important;
+      outline-offset: 2px !important;
       transition: outline-color 80ms linear !important;
+    }
+    .hce-compare-node:hover {
+      outline-color: rgba(31, 111, 235, 0.55) !important;
+    }
+    .hce-compare-node:focus {
+      outline: 2px solid #1f6feb !important;
+      background: rgba(31, 111, 235, 0.10) !important;
     }
     .hce-compare-changed {
       background: rgba(245, 158, 11, 0.20) !important;
