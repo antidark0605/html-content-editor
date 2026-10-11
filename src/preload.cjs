@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('hce', {
   swapCompare: () => ipcRenderer.invoke('compare:swap'),
   getCompareState: () => ipcRenderer.invoke('compare:get-state'),
   analyzeCompare: () => ipcRenderer.invoke('compare:analyze'),
+  editCompareText: (side, nodeId, value) => ipcRenderer.invoke('compare:edit-text', side, nodeId, value),
   mergeCompare: (mode, hunkId, direction) => ipcRenderer.invoke('compare:merge', mode, hunkId, direction),
   undoCompare: () => ipcRenderer.invoke('compare:undo'),
   redoCompare: () => ipcRenderer.invoke('compare:redo'),
@@ -15,5 +16,7 @@ contextBridge.exposeInMainWorld('hce', {
   save: (workingSource) => ipcRenderer.invoke('file:save', workingSource),
   saveAs: (workingSource) => ipcRenderer.invoke('file:save-as', workingSource),
   diff: (workingSource) => ipcRenderer.invoke('html:diff', workingSource),
-  getSession: () => ipcRenderer.invoke('app:get-session')
+  diffAnalysis: (workingSource) => ipcRenderer.invoke('html:diff-analysis', workingSource),
+  getSession: () => ipcRenderer.invoke('app:get-session'),
+  getAppVersion: () => ipcRenderer.invoke('app:get-version')
 });

@@ -7,6 +7,7 @@ import {
 } from '../compare-utils.mjs';
 
 const elements = {
+  appVersion: document.querySelector('#appVersion'),
   openButton: document.querySelector('#openButton'),
   welcomeOpenButton: document.querySelector('#welcomeOpenButton'),
   saveButton: document.querySelector('#saveButton'),
@@ -16,20 +17,28 @@ const elements = {
   editorTools: document.querySelector('#editorTools'),
   compareTools: document.querySelector('#compareTools'),
   compareViewButtons: [...document.querySelectorAll('[data-compare-view]')],
+  visualEditableBadges: [...document.querySelectorAll('.editable-badge')],
   undoButton: document.querySelector('#undoButton'),
   redoButton: document.querySelector('#redoButton'),
   searchInput: document.querySelector('#searchInput'),
   searchNextButton: document.querySelector('#searchNextButton'),
   searchCount: document.querySelector('#searchCount'),
+  editorDiffNav: document.querySelector('#editorDiffNav'),
+  editorPreviousDifferenceButton: document.querySelector('#editorPreviousDifferenceButton'),
+  editorNextDifferenceButton: document.querySelector('#editorNextDifferenceButton'),
+  editorDifferenceCount: document.querySelector('#editorDifferenceCount'),
   welcome: document.querySelector('#welcome'),
   workspace: document.querySelector('#workspace'),
   fileName: document.querySelector('#fileName'),
   dirtyBadge: document.querySelector('#dirtyBadge'),
+  editorModeHint: document.querySelector('#editorModeHint'),
   editableCount: document.querySelector('#editableCount'),
   scriptWarning: document.querySelector('#scriptWarning'),
   frameHost: document.querySelector('#frameHost'),
   pageFrame: document.querySelector('#pageFrame'),
+  diffHost: document.querySelector('#diffHost'),
   diffPanel: document.querySelector('#diffPanel'),
+  editorDiffRail: document.querySelector('#editorDiffRail'),
   compareWorkspace: document.querySelector('#compareWorkspace'),
   visualCompare: document.querySelector('#visualCompare'),
   sourceCompare: document.querySelector('#sourceCompare'),
@@ -76,6 +85,9 @@ const state = {
   searchMatches: [],
   searchIndex: -1,
   pendingCommit: Promise.resolve(),
+  editorDiffAnalysis: null,
+  activeEditorDiffIndex: 0,
+  pendingCompareCommit: Promise.resolve(),
   workspaceMode: 'editor',
   compare: { left: null, right: null },
   compareAnalysis: null,
@@ -158,8 +170,18 @@ function editorStyle() {
 function compareStyle() {
   return `<style data-hce-compare-style>
     .hce-compare-node {
+      cursor: text !important;
       border-radius: 2px !important;
+      outline: 1px dashed transparent !important;
+      outline-offset: 2px !important;
       transition: outline-color 80ms linear !important;
+    }
+    .hce-compare-node:hover {
+      outline-color: rgba(31, 111, 235, 0.55) !important;
+    }
+    .hce-compare-node:focus {
+      outline: 2px solid #1f6feb !important;
+      background: rgba(31, 111, 235, 0.10) !important;
     }
     .hce-compare-changed {
       background: rgba(245, 158, 11, 0.20) !important;
@@ -363,9 +385,112 @@ function wireEditableFrame() {
   runSearch(false);
 }
 
+function editorDiffHunks() {
+  return state.editorDiffAnalysis?.hunks ?? [];
+}
+
+function updateEditorDiffControls() {
+  const hunks = editorDiffHunks();
+  const hasDifferences = hunks.length > 0;
+
+  if (!hasDifferences) {
+    state.activeEditorDiffIndex = 0;
+    elements.editorDifferenceCount.textContent = 'No differences';
+  } else {
+    state.activeEditorDiffIndex = Math.min(
+      Math.max(state.activeEditorDiffIndex, 0),
+      hunks.length - 1
+    );
+    elements.editorDifferenceCount.textContent =
+      `${state.activeEditorDiffIndex + 1} / ${hunks.length}`;
+  }
+
+  elements.editorPreviousDifferenceButton.disabled = !hasDifferences;
+  elements.editorNextDifferenceButton.disabled = !hasDifferences;
+}
+
+function editorDiffRailRatio(hunk) {
+  const rows = [...elements.diffPanel.querySelectorAll(
+    `[data-editor-hunk-id="${hunk.id}"]`
+  )];
+
+  if (rows.length === 0 || elements.diffPanel.scrollHeight <= 0) return 0.5;
+
+  const panelRect = elements.diffPanel.getBoundingClientRect();
+  const tops = rows.map(
+    (row) => row.getBoundingClientRect().top - panelRect.top + elements.diffPanel.scrollTop
+  );
+  const bottoms = rows.map(
+    (row) => row.getBoundingClientRect().bottom - panelRect.top + elements.diffPanel.scrollTop
+  );
+  const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+
+  return Math.min(1, Math.max(0, center / elements.diffPanel.scrollHeight));
+}
+
+function renderEditorDiffRail() {
+  elements.editorDiffRail.replaceChildren();
+  const hunks = editorDiffHunks();
+
+  hunks.forEach((hunk, index) => {
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.title = `Editor difference ${index + 1} of ${hunks.length}`;
+    marker.style.top = `${Math.max(2, Math.min(98, editorDiffRailRatio(hunk) * 100))}%`;
+    marker.classList.toggle('active', index === state.activeEditorDiffIndex);
+    marker.addEventListener('click', () => setActiveEditorDiff(index, true));
+    elements.editorDiffRail.append(marker);
+  });
+}
+
+function setActiveEditorDiff(index, shouldScroll = false) {
+  const hunks = editorDiffHunks();
+  if (hunks.length === 0) {
+    updateEditorDiffControls();
+    renderEditorDiffRail();
+    return;
+  }
+
+  state.activeEditorDiffIndex =
+    ((index % hunks.length) + hunks.length) % hunks.length;
+
+  for (const row of elements.diffPanel.querySelectorAll('.active-hunk')) {
+    row.classList.remove('active-hunk');
+  }
+
+  const hunk = hunks[state.activeEditorDiffIndex];
+  const rows = [...elements.diffPanel.querySelectorAll(
+    `[data-editor-hunk-id="${hunk.id}"]`
+  )];
+  rows.forEach((row) => row.classList.add('active-hunk'));
+
+  updateEditorDiffControls();
+  renderEditorDiffRail();
+
+  if (shouldScroll && rows[0]) {
+    rows[0].scrollIntoView({ behavior: 'auto', block: 'center' });
+  }
+}
+
+function navigateEditorDiff(delta) {
+  const hunks = editorDiffHunks();
+  if (hunks.length === 0) return;
+  setActiveEditorDiff(state.activeEditorDiffIndex + delta, true);
+}
+
+function appendEditorDiffLine(container, kind, text) {
+  const line = document.createElement('span');
+  line.className = `diff-line ${kind}`;
+  line.textContent =
+    (kind === 'added' ? '+ ' : kind === 'removed' ? '- ' : '  ') + text;
+  container.append(line);
+}
+
 function renderEdit() {
-  elements.diffPanel.classList.add('hidden');
+  elements.diffHost.classList.add('hidden');
+  elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
+  elements.editorModeHint.textContent = 'Editable view';
   elements.pageFrame.setAttribute('sandbox', 'allow-same-origin');
   elements.pageFrame.onload = wireEditableFrame;
   elements.pageFrame.srcdoc = buildEditableDocument();
@@ -374,8 +499,10 @@ function renderEdit() {
 }
 
 function renderPreview() {
-  elements.diffPanel.classList.add('hidden');
+  elements.diffHost.classList.add('hidden');
+  elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
+  elements.editorModeHint.textContent = 'Final render · read-only';
   elements.pageFrame.onload = null;
   elements.pageFrame.setAttribute('sandbox', 'allow-same-origin');
   elements.pageFrame.srcdoc = buildPreviewDocument();
@@ -386,29 +513,56 @@ function renderPreview() {
 
 async function renderDiff() {
   elements.frameHost.classList.add('hidden');
-  elements.diffPanel.classList.remove('hidden');
+  elements.diffHost.classList.remove('hidden');
+  elements.editorDiffNav.classList.remove('hidden');
+  elements.editorModeHint.textContent = 'Original ↔ working copy';
   elements.searchInput.disabled = true;
   elements.searchNextButton.disabled = true;
   elements.searchCount.textContent = '';
 
-  const parts = await window.hce.diff(state.workingSource);
+  state.editorDiffAnalysis = await window.hce.diffAnalysis(state.workingSource);
+  state.activeEditorDiffIndex = 0;
   elements.diffPanel.replaceChildren();
 
-  if (!parts.some((part) => part.added || part.removed)) {
+  const analysis = state.editorDiffAnalysis;
+
+  if (!analysis || analysis.hunks.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = 'No changes yet.';
     empty.className = 'diff-line context';
     elements.diffPanel.append(empty);
+    updateEditorDiffControls();
+    renderEditorDiffRail();
     return;
   }
 
-  for (const part of parts) {
-    const line = document.createElement('span');
-    line.className = `diff-line ${part.added ? 'added' : part.removed ? 'removed' : 'context'}`;
-    const prefix = part.added ? '+ ' : part.removed ? '- ' : '  ';
-    line.textContent = prefix + part.value;
-    elements.diffPanel.append(line);
+  const fragment = document.createDocumentFragment();
+
+  for (const row of analysis.rows) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'editor-diff-row';
+
+    if (row.hunkId) {
+      wrapper.dataset.editorHunkId = row.hunkId;
+
+      if (row.leftLineNumber !== null) {
+        appendEditorDiffLine(wrapper, 'removed', row.leftText);
+      }
+      if (row.rightLineNumber !== null) {
+        appendEditorDiffLine(wrapper, 'added', row.rightText);
+      }
+    } else {
+      appendEditorDiffLine(wrapper, 'context', row.rightText || row.leftText);
+    }
+
+    fragment.append(wrapper);
   }
+
+  elements.diffPanel.append(fragment);
+
+  window.requestAnimationFrame(() => {
+    setActiveEditorDiff(0, true);
+  });
 }
 
 async function setMode(mode) {
@@ -451,6 +605,9 @@ async function setWorkspaceMode(mode) {
   if (mode !== 'editor' && mode !== 'compare') return;
   if (state.workspaceMode === 'editor' && mode !== 'editor' && state.session) {
     await flushPendingEdits();
+  }
+  if (state.workspaceMode === 'compare' && mode !== 'compare') {
+    await flushCompareEdits();
   }
 
   state.workspaceMode = mode;
@@ -925,6 +1082,46 @@ function onVisualScroll(side) {
   scheduleVisualMergeGutter();
 }
 
+async function commitCompareEditable(side, editable) {
+  if (!editable?.matches?.('[data-hce-compare-id]')) return;
+
+  const nodeId = editable.dataset.hceCompareId;
+  const before = editable.dataset.hceBefore ?? '';
+  const after = editable.textContent ?? before;
+
+  if (after === before) return;
+
+  const result = await window.hce.editCompareText(side, nodeId, after);
+  if (!result.ok) {
+    editable.textContent = before;
+    showToast(result.reason);
+    return;
+  }
+
+  applyCompareResult(result, { keepIndex: true });
+}
+
+function queueCompareCommit(side, editable) {
+  state.pendingCompareCommit = state.pendingCompareCommit
+    .catch(() => {})
+    .then(() => commitCompareEditable(side, editable));
+
+  return state.pendingCompareCommit;
+}
+
+async function flushCompareEdits() {
+  for (const side of ['left', 'right']) {
+    const { frame } = compareElementsFor(side);
+    const active = frame.contentDocument?.activeElement;
+
+    if (active?.matches?.('[data-hce-compare-id]')) {
+      active.blur();
+    }
+  }
+
+  await state.pendingCompareCommit;
+}
+
 function wireCompareFrame(side) {
   const { frame } = compareElementsFor(side);
   const doc = frame.contentDocument;
@@ -933,6 +1130,47 @@ function wireCompareFrame(side) {
 
   state.compareFrameReady[side] = true;
   applyCompareZoom(frame);
+
+  for (const editable of doc.querySelectorAll('[data-hce-compare-id]')) {
+    editable.setAttribute('contenteditable', 'plaintext-only');
+    editable.setAttribute('spellcheck', 'false');
+
+    editable.addEventListener('focus', () => {
+      editable.dataset.hceBefore = editable.textContent ?? '';
+    });
+
+    editable.addEventListener('keydown', (event) => {
+      const modifier = event.ctrlKey || event.metaKey;
+
+      if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        editable.blur();
+        void state.pendingCompareCommit.then(() => undoCompare());
+        return;
+      }
+
+      if (modifier && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+        event.preventDefault();
+        editable.blur();
+        void state.pendingCompareCommit.then(() => redoCompare());
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        editable.textContent = editable.dataset.hceBefore ?? editable.textContent;
+        editable.blur();
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        editable.blur();
+      }
+    });
+
+    editable.addEventListener('blur', () => {
+      void queueCompareCommit(side, editable);
+    });
+  }
 
   doc.addEventListener('click', (event) => {
     const anchor = event.target.closest?.('a');
@@ -1104,6 +1342,9 @@ function renderCompare() {
   elements.sourceCompare.classList.toggle('hidden', visual);
   elements.syncScrollLabel.classList.toggle('hidden', !visual);
   elements.zoomControls.classList.toggle('hidden', !visual);
+  for (const badge of elements.visualEditableBadges) {
+    badge.classList.toggle('hidden', !visual);
+  }
 
   for (const button of elements.compareViewButtons) {
     button.classList.toggle('active', button.dataset.compareView === state.compareView);
@@ -1119,8 +1360,9 @@ function renderCompare() {
   updateDifferenceControls();
 }
 
-function setCompareView(view) {
+async function setCompareView(view) {
   if (view !== 'visual' && view !== 'source') return;
+  if (state.compareView === 'visual') await flushCompareEdits();
   state.compareView = view;
   state.activeDifferenceIndex = 0;
   renderCompare();
@@ -1149,6 +1391,7 @@ function applyCompareResult(result, options = {}) {
 }
 
 async function openCompare(side) {
+  await flushCompareEdits();
   const result = await window.hce.openCompare(side);
   if (result.error) {
     showToast('Open failed: ' + result.error);
@@ -1159,6 +1402,7 @@ async function openCompare(side) {
 }
 
 async function reloadCompare(side) {
+  await flushCompareEdits();
   const result = await window.hce.reloadCompare(side);
   if (result.error) {
     showToast('Reload failed: ' + result.error);
@@ -1172,11 +1416,13 @@ async function reloadCompare(side) {
 }
 
 async function swapCompare() {
+  await flushCompareEdits();
   const result = await window.hce.swapCompare();
   applyCompareResult(result);
 }
 
 async function saveCompare(side) {
+  await flushCompareEdits();
   const result = await window.hce.saveCompare(side);
   if (!result.ok) {
     showToast('Save failed: ' + result.reason);
@@ -1192,6 +1438,7 @@ async function saveCompare(side) {
 }
 
 async function undoCompare() {
+  await flushCompareEdits();
   const result = await window.hce.undoCompare();
   if (!result.ok) {
     showToast(result.reason);
@@ -1199,10 +1446,11 @@ async function undoCompare() {
   }
 
   applyCompareResult(result, { keepIndex: true });
-  showToast('Merge undone.');
+  showToast('Compare change undone.');
 }
 
 async function redoCompare() {
+  await flushCompareEdits();
   const result = await window.hce.redoCompare();
   if (!result.ok) {
     showToast(result.reason);
@@ -1210,10 +1458,11 @@ async function redoCompare() {
   }
 
   applyCompareResult(result, { keepIndex: true });
-  showToast('Merge redone.');
+  showToast('Compare change redone.');
 }
 
 async function mergeDifference(direction, explicitHunkId = null) {
+  await flushCompareEdits();
   const hunk = explicitHunkId
     ? currentHunks().find((candidate) => candidate.id === explicitHunkId)
     : activeHunk();
@@ -1255,6 +1504,8 @@ function loadSession(session) {
   state.redoStack = [];
   state.searchMatches = [];
   state.searchIndex = -1;
+  state.editorDiffAnalysis = null;
+  state.activeEditorDiffIndex = 0;
 
   refreshWorkspaceVisibility();
   elements.fileName.textContent = session.fileName;
@@ -1401,7 +1652,7 @@ for (const button of elements.workspaceModeButtons) {
 }
 
 for (const button of elements.compareViewButtons) {
-  button.addEventListener('click', () => setCompareView(button.dataset.compareView));
+  button.addEventListener('click', () => void setCompareView(button.dataset.compareView));
 }
 
 elements.openCompareLeftButton.addEventListener('click', () => void openCompare('left'));
@@ -1428,6 +1679,8 @@ elements.saveButton.addEventListener('click', save);
 elements.saveAsButton.addEventListener('click', saveAs);
 elements.undoButton.addEventListener('click', undo);
 elements.redoButton.addEventListener('click', redo);
+elements.editorPreviousDifferenceButton.addEventListener('click', () => navigateEditorDiff(-1));
+elements.editorNextDifferenceButton.addEventListener('click', () => navigateEditorDiff(1));
 
 for (const button of elements.modeButtons) {
   button.addEventListener('click', () => void setMode(button.dataset.mode));
@@ -1441,6 +1694,18 @@ elements.searchNextButton.addEventListener('click', () => runSearch(true));
 
 document.addEventListener('keydown', (event) => {
   const modifier = event.ctrlKey || event.metaKey;
+
+  if (state.workspaceMode === 'editor' && state.mode === 'diff' && modifier && event.altKey && event.key === 'ArrowDown') {
+    event.preventDefault();
+    navigateEditorDiff(1);
+    return;
+  }
+
+  if (state.workspaceMode === 'editor' && state.mode === 'diff' && modifier && event.altKey && event.key === 'ArrowUp') {
+    event.preventDefault();
+    navigateEditorDiff(-1);
+    return;
+  }
 
   if (state.workspaceMode === 'compare' && modifier && event.altKey && event.key === 'ArrowDown') {
     event.preventDefault();
@@ -1529,8 +1794,10 @@ refreshWorkspaceVisibility();
 
 Promise.all([
   window.hce.getSession(),
-  window.hce.getCompareState()
-]).then(([existing, compare]) => {
+  window.hce.getCompareState(),
+  window.hce.getAppVersion()
+]).then(([existing, compare, version]) => {
+  elements.appVersion.textContent = `v${version}`;
   if (existing) loadSession(existing);
 
   if (compare?.state && (compare.state.left || compare.state.right)) {

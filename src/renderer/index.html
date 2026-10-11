@@ -10,6 +10,7 @@
   <header class="app-header">
     <div class="brand">
       <strong>HTML Content Editor</strong>
+      <span id="appVersion" class="app-version">v0.0.0</span>
       <span class="tagline">Edit text. Preserve layout.</span>
     </div>
 
@@ -28,14 +29,20 @@
 
     <div id="editorTools" class="editor-tools">
       <div class="mode-tabs segmented" role="tablist" aria-label="Editor mode">
-        <button class="mode active" data-mode="edit" role="tab">Edit</button>
-        <button class="mode" data-mode="preview" role="tab">Preview</button>
-        <button class="mode" data-mode="diff" role="tab">Diff</button>
+        <button class="mode active" data-mode="edit" role="tab" title="Editable view. Click visible text to change it.">Edit</button>
+        <button class="mode" data-mode="preview" role="tab" title="Final read-only render without editing helper elements.">Preview</button>
+        <button class="mode" data-mode="diff" role="tab" title="Compare the original file with your current unsaved version.">Diff</button>
       </div>
 
       <div class="history-actions">
         <button id="undoButton" disabled title="Undo (Ctrl+Z)">Undo</button>
         <button id="redoButton" disabled title="Redo (Ctrl+Y)">Redo</button>
+      </div>
+
+      <div id="editorDiffNav" class="difference-nav hidden">
+        <button id="editorPreviousDifferenceButton" title="Previous editor difference" disabled>↑</button>
+        <span id="editorDifferenceCount">0 differences</span>
+        <button id="editorNextDifferenceButton" title="Next editor difference" disabled>↓</button>
       </div>
 
       <div class="search-box">
@@ -58,8 +65,8 @@
       </div>
 
       <div class="compare-history-actions">
-        <button id="compareUndoButton" title="Undo last merge (Ctrl+Z)" disabled>Undo</button>
-        <button id="compareRedoButton" title="Redo merge (Ctrl+Y)" disabled>Redo</button>
+        <button id="compareUndoButton" title="Undo last compare change (Ctrl+Z)" disabled>Undo</button>
+        <button id="compareRedoButton" title="Redo compare change (Ctrl+Y)" disabled>Redo</button>
       </div>
 
       <label id="syncScrollLabel" class="sync-toggle">
@@ -99,6 +106,7 @@
           <span id="dirtyBadge" class="dirty-badge hidden">Unsaved</span>
         </div>
         <div class="status-right">
+          <span id="editorModeHint" class="mode-hint">Editable view</span>
           <span id="editableCount"></span>
           <span id="scriptWarning" class="warning hidden">Page scripts disabled</span>
         </div>
@@ -108,7 +116,10 @@
         <iframe id="pageFrame" title="HTML page editor" sandbox="allow-same-origin"></iframe>
       </div>
 
-      <div id="diffPanel" class="diff-panel hidden" aria-live="polite"></div>
+      <div id="diffHost" class="editor-diff-host hidden">
+        <div id="diffPanel" class="diff-panel" aria-live="polite"></div>
+        <div id="editorDiffRail" class="difference-rail editor-diff-rail" aria-label="Editor difference overview"></div>
+      </div>
     </section>
 
     <section id="compareWorkspace" class="compare-workspace hidden">
@@ -118,6 +129,7 @@
             <strong>Left</strong>
             <span id="compareLeftName" class="compare-file-name">No file open</span>
             <span id="compareLeftDirty" class="dirty-badge hidden">Unsaved</span>
+            <span class="editable-badge">Editable in Visual</span>
             <span id="compareLeftScriptWarning" class="warning hidden">Scripts disabled</span>
           </div>
           <div class="compare-pane-actions">
@@ -132,6 +144,7 @@
             <strong>Right</strong>
             <span id="compareRightName" class="compare-file-name">No file open</span>
             <span id="compareRightDirty" class="dirty-badge hidden">Unsaved</span>
+            <span class="editable-badge">Editable in Visual</span>
             <span id="compareRightScriptWarning" class="warning hidden">Scripts disabled</span>
           </div>
           <div class="compare-pane-actions">

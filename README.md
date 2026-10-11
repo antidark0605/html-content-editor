@@ -13,20 +13,23 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 - Open `.html` / `.htm` files
 - Click highlighted visible text and edit it directly
 - Preserve existing tags, classes, inline styles, CSS, and surrounding markup
-- Preview the modified HTML before saving
-- Review a line diff
+- Preview the modified HTML before saving in a read-only final-render view
+- Review Editor changes with a navigable diff, previous/next controls, and an overview rail
 - Undo / redo committed text edits
 - Search visible editable text
 - Save / Save As
 - Create a one-time `*.hce-backup.html` before the first overwrite
 - Side-by-side Compare workspace for two HTML files
 - Visual Compare highlights changed visible text, including word-level changes
+- Edit visible text directly on either Visual Compare pane; changes immediately become part of the comparison
 - Source Compare aligns lines, highlights inline changes, and provides per-hunk left/right merge arrows
 - Previous/next difference navigation plus a difference overview rail positioned from the actual diff locations
 - Araxis-style ← / → merge controls shown beside each visible/source diff block instead of relying on a toolbar-level merge action
-- Multi-level Compare Undo/Redo for merge operations, including Ctrl+Z / Ctrl+Y and visible history depth
+- Multi-level Compare Undo/Redo for merges and direct Visual Compare edits, including Ctrl+Z / Ctrl+Y and visible history depth
 - Content-anchor synchronized scrolling in Visual Compare to keep related sections aligned without feedback bounce
 - Swap, Reload, Save per side, and shared Zoom in Visual Compare
+- App version is shown in the UI and Windows title
+- Open-file dialogs remember the last useful directory, prefer the other Compare pane when appropriate, and safely fall back when a remembered/network path is unavailable
 - Windows installer and portable executable built by GitHub Actions
 
 ## Safety model
@@ -37,15 +40,36 @@ This repository is public. Do not commit private/internal HTML samples, credenti
 
 Windows builds are currently unsigned, so Microsoft SmartScreen may warn when launching a downloaded build. Code signing can be added later.
 
+## Editor modes
+
+- **Edit**: directly edit visible text. The app temporarily wraps editable text nodes with helper elements so they can receive focus.
+- **Preview**: read-only final rendering of the current working HTML without those editing helpers. Use this as the authoritative layout check.
+- **Diff**: compare the original file with the current working copy. The diff view provides previous/next navigation and a right-side overview rail whose markers map to the rendered difference positions.
+
+## Open-directory behavior
+
+The app remembers the most recently opened directory in Electron's per-user `userData/settings.json`. It does not blindly trust that path.
+
+For Editor Open, the preference order is:
+
+1. current Editor file directory
+2. last remembered open directory
+3. Documents
+4. Home
+
+For Compare Open, the other pane's directory is preferred first so opening the second file usually starts beside the first one.
+
+Every candidate is checked before it is passed to the native Windows dialog. Missing, disconnected, or stalled network-drive paths are ignored and the app falls back to the next usable directory. Directory checks have a short timeout so an unavailable NAS/VPN mapping does not block opening the dialog.
+
 ## Compare two pages
 
 Switch to **Compare**, then open a left and right HTML file.
 
 ### Visual
 
-Visual Compare renders both pages and compares their visible text. Changed blocks are highlighted, with stronger word-level highlighting inside changed text. Previous/next difference controls jump between change blocks.
+Visual Compare renders both pages and compares their visible text. Changed blocks are highlighted, with stronger word-level highlighting inside changed text. Previous/next difference controls jump between change blocks. Both panes are directly editable: click visible text, type, then blur or press Enter. The comparison recalculates immediately and the edited side becomes Unsaved.
 
-Visual merge copies text only when the two change blocks have compatible text-node structure, so the target page keeps its existing tags, classes, and formatting. Each mergeable difference gets its own ← / → controls in the center gutter. Structural insertions/deletions show disabled visual arrows and should be merged in Source view.
+Visual merge copies text only when the two change blocks have compatible text-node structure, so the target page keeps its existing tags, classes, and formatting. Each mergeable difference gets its own ← / → controls in the center gutter. Direct Visual edits and merge operations share the same multi-level Undo/Redo history. Structural insertions/deletions show disabled visual arrows and should be merged in Source view.
 
 **Sync** uses matching text anchors from the diff to align related content rather than simply copying scrollbar percentages. Programmatic scrolling on the follower pane is suppressed from feeding back into the leader pane, avoiding the old oscillation/back-jump behavior.
 
@@ -63,7 +87,7 @@ Source Compare provides an Araxis/WinMerge/Meld-style aligned text view:
 - overview rail whose marker position reflects each diff's real document position
 - Save button and unsaved indicator for each side
 
-Source merge copies the selected source hunk exactly, so it can also handle HTML structure, attributes, CSS, and inserted/deleted lines.
+Source merge copies the selected source hunk exactly, so it can also handle HTML structure, attributes, CSS, and inserted/deleted lines. Source Compare remains intentionally read-only for direct typing; use Visual Compare for text editing and Source Compare for precise structural merge operations.
 
 JavaScript remains disabled in Visual Compare. Relative CSS/images are resolved from each HTML file's own directory.
 
@@ -80,7 +104,7 @@ The first version focuses on static HTML content. It intentionally does not edit
 - `<option>`
 - SVG / MathML / canvas content
 
-Pages whose visible content is generated only by JavaScript will not expose that generated text for editing in v0.1.
+Pages whose visible content is generated only by JavaScript will not expose that generated text for editing in v0.5.
 
 The Edit view temporarily wraps editable text in helper spans, so a page with unusually strict CSS selectors may look slightly different while editing. **Preview does not contain those wrappers**, and is the authoritative layout check before saving.
 
@@ -105,7 +129,7 @@ Real Electron UI validation:
 npm run test:ui
 ```
 
-The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test opens two real HTML fixtures, checks visual diff highlighting and diff-local merge arrows, exercises synchronized scrolling and verifies it stays stable, verifies source rail markers are tied to the real diff rows, performs multiple merges, checks multi-level Undo/Redo, and saves the changed side. CI also keeps validation screenshots as an artifact.
+The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test opens real HTML fixtures, verifies the displayed version, edits both Visual Compare panes, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, edits visible text, validates Edit/Preview behavior and Editor diff navigation/rail markers. CI also keeps validation screenshots as an artifact.
 
 ## Build for Windows
 
