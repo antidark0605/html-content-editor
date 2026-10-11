@@ -11,19 +11,45 @@ await fs.mkdir(outputDir, { recursive: true });
 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hce-ui-'));
 const left = path.join(tempDir, 'compare-left.html');
 const right = path.join(tempDir, 'compare-right.html');
+const editorFile = path.join(tempDir, 'editor.html');
+
 await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), left);
 await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), right);
+await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), editorFile);
 
 const electronApp = await electron.launch({
   args: [
     root,
+    `--editor-file=${editorFile}`,
     `--compare-left=${left}`,
     `--compare-right=${right}`
   ]
 });
 
+async function editTextNode(frame, selector, replacement) {
+  const target = frame.locator(selector).first();
+  await target.waitFor();
+
+  await target.evaluate((element, value) => {
+    element.focus();
+    element.textContent = value;
+    element.blur();
+  }, replacement);
+}
+
+function historyCount(text, name) {
+  const match = new RegExp(`${name} \\(\\d+\\)`).exec(text ?? '');
+  return match ? Number(match[1]) : 0;
+}
+
 try {
   const page = await electronApp.firstWindow();
+
+  await page.waitForFunction(() =>
+    document.querySelector('#appVersion')?.textContent === 'v0.5.0'
+  );
+  assert.equal(await page.locator('#appVersion').textContent(), 'v0.5.0');
+
   await page.waitForSelector('#compareWorkspace:not(.hidden)');
   await page.waitForFunction(() => {
     const text = document.querySelector('#differenceCount')?.textContent ?? '';
@@ -41,10 +67,8 @@ try {
   await leftFrame.waitForSelector('[data-hce-hunk]');
   await rightFrame.waitForSelector('[data-hce-hunk]');
 
-  const leftHunks = await leftFrame.locator('[data-hce-hunk]').count();
-  const rightHunks = await rightFrame.locator('[data-hce-hunk]').count();
-  assert.ok(leftHunks > 0);
-  assert.ok(rightHunks > 0);
+  assert.ok(await leftFrame.locator('[data-hce-hunk]').count() > 0);
+  assert.ok(await rightFrame.locator('[data-hce-hunk]').count() > 0);
 
   await page.waitForFunction(() => {
     const frames = [
@@ -62,18 +86,12 @@ try {
     });
   });
 
-  const activeLeft = await leftFrame.locator('.hce-active-diff').count();
-  const activeRight = await rightFrame.locator('.hce-active-diff').count();
-  assert.ok(activeLeft > 0);
-  assert.ok(activeRight > 0);
-
   await page.waitForFunction(() =>
-    document.querySelectorAll('#visualMergeGutter .visual-merge-pair').length > 0
+    document.querySelectorAll('#visualMergeGutter .visual-merge-pair').length === 1
   );
+
   const visualMergePairs = page.locator('#visualMergeGutter .visual-merge-pair');
-  assert.ok(await visualMergePairs.count() > 0, 'Expected merge arrows beside visible differences');
-  assert.equal(await visualMergePairs.count(), 1, 'Visual view should show merge arrows only for the active diff');
-  assert.ok(await visualMergePairs.first().locator('button').count() === 2);
+  assert.equal(await visualMergePairs.first().locator('button').count(), 2);
 
   const visualPlacement = await page.evaluate(() => {
     const pair = document.querySelector('#visualMergeGutter .visual-merge-pair');
@@ -83,8 +101,7 @@ try {
     ];
 
     const activeCenters = frames.map((frame) => {
-      const doc = frame.contentDocument;
-      const nodes = [...doc.querySelectorAll('.hce-active-diff')];
+      const nodes = [...frame.contentDocument.querySelectorAll('.hce-active-diff')];
       const tops = nodes.map((node) => node.getBoundingClientRect().top);
       const bottoms = nodes.map((node) => node.getBoundingClientRect().bottom);
       const top = Math.min(...tops);
@@ -123,7 +140,6 @@ try {
   });
 
   await page.waitForTimeout(300);
-
   await leftFrame.evaluate(() => {
     const scroller = document.scrollingElement;
     scroller.scrollTop = Math.min(900, scroller.scrollHeight - scroller.clientHeight);
@@ -141,15 +157,58 @@ try {
     `Synced scroll bounced: ${firstRightTop} -> ${secondRightTop}`
   );
 
+  // Both Visual Compare panes are directly editable and participate in one history.
+  await editTextNode(
+    leftFrame,
+    '[data-hce-compare-id]:has-text("This introduction is the same on both pages.")',
+    'Left introduction edited in Visual Compare.'
+  );
+
+  await page.waitForFunction(() =>
+    !document.querySelector('#compareLeftDirty')?.classList.contains('hidden') &&
+    /Undo \(1\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? '')
+  );
+
+  await editTextNode(
+    rightFrame,
+    '[data-hce-compare-id]:has-text("This final section is the same on both pages.")',
+    'Right final section edited in Visual Compare.'
+  );
+
+  await page.waitForFunction(() =>
+    !document.querySelector('#compareRightDirty')?.classList.contains('hidden') &&
+    /Undo \(2\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? '')
+  );
+
+  await page.locator('#compareUndoButton').click();
+  await page.waitForFunction(() => /Undo \(1\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? ''));
+  await page.locator('#compareUndoButton').click();
+  await page.waitForFunction(() => document.querySelector('#compareUndoButton')?.disabled === true);
+  assert.match(await page.locator('#compareRedoButton').textContent() ?? '', /Redo \(2\)/);
+
+  await page.locator('#compareRedoButton').click();
+  await page.waitForFunction(() => /Undo \(1\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? ''));
+  await page.locator('#compareRedoButton').click();
+  await page.waitForFunction(() => /Undo \(2\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? ''));
+
+  assert.ok(await leftFrame.locator('text=Left introduction edited in Visual Compare.').count() > 0);
+  assert.ok(await rightFrame.locator('text=Right final section edited in Visual Compare.').count() > 0);
+
+  await page.locator('#saveCompareLeftButton').click();
+  await page.waitForFunction(() => document.querySelector('#compareLeftDirty')?.classList.contains('hidden'));
+  await page.locator('#saveCompareRightButton').click();
+  await page.waitForFunction(() => document.querySelector('#compareRightDirty')?.classList.contains('hidden'));
+
+  const baseHistoryCount = historyCount(await page.locator('#compareUndoButton').textContent(), 'Undo');
+  assert.equal(baseHistoryCount, 2);
+
   await page.locator('[data-compare-view="source"]').click();
   await page.waitForSelector('#sourceCompare:not(.hidden) .source-row[data-hunk-id]');
 
-  const sourceRows = await page.locator('#sourceCompare .source-row[data-hunk-id]').count();
-  assert.ok(sourceRows > 0);
+  assert.ok(await page.locator('#sourceCompare .source-row[data-hunk-id]').count() > 0);
 
   const sourceMergePairs = page.locator('#sourceCompare .source-merge-pair');
-  const pairCount = await sourceMergePairs.count();
-  assert.ok(pairCount >= 2, 'Expected multiple diff-local merge controls in Source view');
+  assert.ok(await sourceMergePairs.count() >= 2, 'Expected multiple diff-local merge controls in Source view');
 
   const railValidation = await page.evaluate(() => {
     const container = document.querySelector('#sourceCompare');
@@ -199,27 +258,95 @@ try {
     await page.waitForTimeout(150);
   }
 
-  await page.waitForFunction(() => {
-    const button = document.querySelector('#compareUndoButton');
-    return /Undo \(2\)/.test(button?.textContent ?? '');
-  });
-  assert.equal(await page.locator('#compareUndoButton').isEnabled(), true);
-  assert.equal(await page.locator('#compareRedoButton').isEnabled(), false);
+  await page.waitForFunction((expected) => {
+    const text = document.querySelector('#compareUndoButton')?.textContent ?? '';
+    return text.includes(`Undo (${expected})`);
+  }, baseHistoryCount + 2);
 
   await page.locator('#compareUndoButton').click();
   await page.locator('#compareUndoButton').click();
 
-  await page.waitForFunction(() => document.querySelector('#compareUndoButton')?.disabled === true);
+  await page.waitForFunction((expected) => {
+    const text = document.querySelector('#compareUndoButton')?.textContent ?? '';
+    return text.includes(`Undo (${expected})`);
+  }, baseHistoryCount);
   assert.match(await page.locator('#compareRedoButton').textContent() ?? '', /Redo \(2\)/);
 
   await page.locator('#compareRedoButton').click();
-  await page.waitForFunction(() => /Undo \(1\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? ''));
+  await page.waitForFunction((expected) => {
+    const text = document.querySelector('#compareUndoButton')?.textContent ?? '';
+    return text.includes(`Undo (${expected})`);
+  }, baseHistoryCount + 1);
 
   await page.locator('#saveCompareRightButton').click();
   await page.waitForFunction(() => document.querySelector('#compareRightDirty')?.classList.contains('hidden'));
 
   const savedSource = await fs.readFile(right, 'utf8');
   assert.notEqual(savedSource, initialSource, 'Expected redo result to be saved to the right file');
+
+  // Editor mode: Edit is interactive, Preview is helper-free/read-only, Diff has its own rail/navigation.
+  await page.locator('[data-workspace-mode="editor"]').click();
+  await page.waitForSelector('#workspace:not(.hidden)');
+  await page.locator('[data-mode="edit"]').click();
+
+  const editorFrameHandle = await page.$('#pageFrame');
+  const editorFrame = await editorFrameHandle.contentFrame();
+  await editorFrame.waitForSelector('[data-hce-id]');
+
+  assert.equal(await page.locator('#editorModeHint').textContent(), 'Editable view');
+
+  await editTextNode(
+    editorFrame,
+    '[data-hce-id]:has-text("HTML Compare Demo")',
+    'HTML Compare Demo Edited'
+  );
+  await editTextNode(
+    editorFrame,
+    '[data-hce-id]:has-text("TTFA is measured before the first audio frame.")',
+    'TTFA is now measured before the first audio frame.'
+  );
+
+  await page.waitForFunction(() =>
+    !document.querySelector('#dirtyBadge')?.classList.contains('hidden')
+  );
+
+  await page.locator('[data-mode="preview"]').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#editorModeHint')?.textContent === 'Final render · read-only'
+  );
+  assert.equal(await editorFrame.locator('[data-hce-id]').count(), 0);
+  assert.ok(await editorFrame.locator('text=HTML Compare Demo Edited').count() > 0);
+
+  await page.locator('[data-mode="edit"]').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#editorModeHint')?.textContent === 'Editable view'
+  );
+  await editorFrame.waitForSelector('[data-hce-id]');
+
+  await page.locator('[data-mode="diff"]').click();
+  await page.waitForSelector('#diffHost:not(.hidden)');
+
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#editorDifferenceCount')?.textContent ?? '';
+    return /1\s*\/\s*\d+/.test(text) &&
+      document.querySelectorAll('#editorDiffRail button').length >= 2;
+  });
+
+  const editorRailCount = await page.locator('#editorDiffRail button').count();
+  assert.ok(editorRailCount >= 2, 'Expected multiple editor diff rail markers');
+
+  const firstEditorDiffCount = await page.locator('#editorDifferenceCount').textContent();
+  await page.locator('#editorNextDifferenceButton').click();
+  await page.waitForFunction((before) =>
+    document.querySelector('#editorDifferenceCount')?.textContent !== before
+  , firstEditorDiffCount);
+
+  assert.ok(await page.locator('#diffPanel .editor-diff-row.active-hunk').count() > 0);
+
+  await page.screenshot({
+    path: path.join(outputDir, 'editor-diff.png'),
+    fullPage: true
+  });
 } finally {
   await electronApp.close();
   await fs.rm(tempDir, { recursive: true, force: true });
