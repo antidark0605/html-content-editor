@@ -17,6 +17,7 @@ const elements = {
   editorTools: document.querySelector('#editorTools'),
   compareTools: document.querySelector('#compareTools'),
   compareViewButtons: [...document.querySelectorAll('[data-compare-view]')],
+  visualEditableBadges: [...document.querySelectorAll('.editable-badge')],
   undoButton: document.querySelector('#undoButton'),
   redoButton: document.querySelector('#redoButton'),
   searchInput: document.querySelector('#searchInput'),
@@ -1341,6 +1342,9 @@ function renderCompare() {
   elements.sourceCompare.classList.toggle('hidden', visual);
   elements.syncScrollLabel.classList.toggle('hidden', !visual);
   elements.zoomControls.classList.toggle('hidden', !visual);
+  for (const badge of elements.visualEditableBadges) {
+    badge.classList.toggle('hidden', !visual);
+  }
 
   for (const button of elements.compareViewButtons) {
     button.classList.toggle('active', button.dataset.compareView === state.compareView);
