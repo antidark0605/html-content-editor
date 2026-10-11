@@ -384,9 +384,112 @@ function wireEditableFrame() {
   runSearch(false);
 }
 
+function editorDiffHunks() {
+  return state.editorDiffAnalysis?.hunks ?? [];
+}
+
+function updateEditorDiffControls() {
+  const hunks = editorDiffHunks();
+  const hasDifferences = hunks.length > 0;
+
+  if (!hasDifferences) {
+    state.activeEditorDiffIndex = 0;
+    elements.editorDifferenceCount.textContent = 'No differences';
+  } else {
+    state.activeEditorDiffIndex = Math.min(
+      Math.max(state.activeEditorDiffIndex, 0),
+      hunks.length - 1
+    );
+    elements.editorDifferenceCount.textContent =
+      `${state.activeEditorDiffIndex + 1} / ${hunks.length}`;
+  }
+
+  elements.editorPreviousDifferenceButton.disabled = !hasDifferences;
+  elements.editorNextDifferenceButton.disabled = !hasDifferences;
+}
+
+function editorDiffRailRatio(hunk) {
+  const rows = [...elements.diffPanel.querySelectorAll(
+    `[data-editor-hunk-id="${hunk.id}"]`
+  )];
+
+  if (rows.length === 0 || elements.diffPanel.scrollHeight <= 0) return 0.5;
+
+  const panelRect = elements.diffPanel.getBoundingClientRect();
+  const tops = rows.map(
+    (row) => row.getBoundingClientRect().top - panelRect.top + elements.diffPanel.scrollTop
+  );
+  const bottoms = rows.map(
+    (row) => row.getBoundingClientRect().bottom - panelRect.top + elements.diffPanel.scrollTop
+  );
+  const center = (Math.min(...tops) + Math.max(...bottoms)) / 2;
+
+  return Math.min(1, Math.max(0, center / elements.diffPanel.scrollHeight));
+}
+
+function renderEditorDiffRail() {
+  elements.editorDiffRail.replaceChildren();
+  const hunks = editorDiffHunks();
+
+  hunks.forEach((hunk, index) => {
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.title = `Editor difference ${index + 1} of ${hunks.length}`;
+    marker.style.top = `${Math.max(2, Math.min(98, editorDiffRailRatio(hunk) * 100))}%`;
+    marker.classList.toggle('active', index === state.activeEditorDiffIndex);
+    marker.addEventListener('click', () => setActiveEditorDiff(index, true));
+    elements.editorDiffRail.append(marker);
+  });
+}
+
+function setActiveEditorDiff(index, shouldScroll = false) {
+  const hunks = editorDiffHunks();
+  if (hunks.length === 0) {
+    updateEditorDiffControls();
+    renderEditorDiffRail();
+    return;
+  }
+
+  state.activeEditorDiffIndex =
+    ((index % hunks.length) + hunks.length) % hunks.length;
+
+  for (const row of elements.diffPanel.querySelectorAll('.active-hunk')) {
+    row.classList.remove('active-hunk');
+  }
+
+  const hunk = hunks[state.activeEditorDiffIndex];
+  const rows = [...elements.diffPanel.querySelectorAll(
+    `[data-editor-hunk-id="${hunk.id}"]`
+  )];
+  rows.forEach((row) => row.classList.add('active-hunk'));
+
+  updateEditorDiffControls();
+  renderEditorDiffRail();
+
+  if (shouldScroll && rows[0]) {
+    rows[0].scrollIntoView({ behavior: 'auto', block: 'center' });
+  }
+}
+
+function navigateEditorDiff(delta) {
+  const hunks = editorDiffHunks();
+  if (hunks.length === 0) return;
+  setActiveEditorDiff(state.activeEditorDiffIndex + delta, true);
+}
+
+function appendEditorDiffLine(container, kind, text) {
+  const line = document.createElement('span');
+  line.className = `diff-line ${kind}`;
+  line.textContent =
+    (kind === 'added' ? '+ ' : kind === 'removed' ? '- ' : '  ') + text;
+  container.append(line);
+}
+
 function renderEdit() {
-  elements.diffPanel.classList.add('hidden');
+  elements.diffHost.classList.add('hidden');
+  elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
+  elements.editorModeHint.textContent = 'Editable view';
   elements.pageFrame.setAttribute('sandbox', 'allow-same-origin');
   elements.pageFrame.onload = wireEditableFrame;
   elements.pageFrame.srcdoc = buildEditableDocument();
@@ -395,8 +498,10 @@ function renderEdit() {
 }
 
 function renderPreview() {
-  elements.diffPanel.classList.add('hidden');
+  elements.diffHost.classList.add('hidden');
+  elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
+  elements.editorModeHint.textContent = 'Final render · read-only';
   elements.pageFrame.onload = null;
   elements.pageFrame.setAttribute('sandbox', 'allow-same-origin');
   elements.pageFrame.srcdoc = buildPreviewDocument();
@@ -407,29 +512,56 @@ function renderPreview() {
 
 async function renderDiff() {
   elements.frameHost.classList.add('hidden');
-  elements.diffPanel.classList.remove('hidden');
+  elements.diffHost.classList.remove('hidden');
+  elements.editorDiffNav.classList.remove('hidden');
+  elements.editorModeHint.textContent = 'Original ↔ working copy';
   elements.searchInput.disabled = true;
   elements.searchNextButton.disabled = true;
   elements.searchCount.textContent = '';
 
-  const parts = await window.hce.diff(state.workingSource);
+  state.editorDiffAnalysis = await window.hce.diffAnalysis(state.workingSource);
+  state.activeEditorDiffIndex = 0;
   elements.diffPanel.replaceChildren();
 
-  if (!parts.some((part) => part.added || part.removed)) {
+  const analysis = state.editorDiffAnalysis;
+
+  if (!analysis || analysis.hunks.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = 'No changes yet.';
     empty.className = 'diff-line context';
     elements.diffPanel.append(empty);
+    updateEditorDiffControls();
+    renderEditorDiffRail();
     return;
   }
 
-  for (const part of parts) {
-    const line = document.createElement('span');
-    line.className = `diff-line ${part.added ? 'added' : part.removed ? 'removed' : 'context'}`;
-    const prefix = part.added ? '+ ' : part.removed ? '- ' : '  ';
-    line.textContent = prefix + part.value;
-    elements.diffPanel.append(line);
+  const fragment = document.createDocumentFragment();
+
+  for (const row of analysis.rows) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'editor-diff-row';
+
+    if (row.hunkId) {
+      wrapper.dataset.editorHunkId = row.hunkId;
+
+      if (row.leftLineNumber !== null) {
+        appendEditorDiffLine(wrapper, 'removed', row.leftText);
+      }
+      if (row.rightLineNumber !== null) {
+        appendEditorDiffLine(wrapper, 'added', row.rightText);
+      }
+    } else {
+      appendEditorDiffLine(wrapper, 'context', row.rightText || row.leftText);
+    }
+
+    fragment.append(wrapper);
   }
+
+  elements.diffPanel.append(fragment);
+
+  window.requestAnimationFrame(() => {
+    setActiveEditorDiff(0, true);
+  });
 }
 
 async function setMode(mode) {
