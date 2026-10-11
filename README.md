@@ -29,6 +29,9 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 - Content-anchor synchronized scrolling in Visual Compare to keep related sections aligned without feedback bounce
 - Swap, Reload, Save per side, and shared Zoom in Visual Compare
 - App version is shown in the UI and Windows title
+- About dialog shows version, build commit, runtime/platform information, project, issues, and MIT license links
+- Drag a single `.html` / `.htm` file into Editor, Compare Left, or Compare Right to open it there
+- Copy the full path of the current Editor/Compare file to the Windows clipboard
 - Open-file dialogs remember the last useful directory, prefer the other Compare pane when appropriate, and safely fall back when a remembered/network path is unavailable
 - Windows installer and portable executable built by GitHub Actions
 
@@ -39,6 +42,18 @@ HTML can contain executable JavaScript. Page scripts are intentionally **disable
 This repository is public. Do not commit private/internal HTML samples, credentials, API keys, customer data, or proprietary material.
 
 Windows builds are currently unsigned, so Microsoft SmartScreen may warn when launching a downloaded build. Code signing can be added later.
+
+## About and drag & drop
+
+The **About** dialog provides the current app version, build commit, Electron/Chrome/Node versions, Windows platform/architecture information, GitHub project and issue links, and the MIT license link. It intentionally does not collect telemetry or maintain a persistent diagnostics log.
+
+You can drag one `.html` or `.htm` file at a time into the app:
+
+- Editor workspace → open in Editor
+- Compare workspace left target → open as Left
+- Compare workspace right target → open as Right
+
+Existing unsaved-change confirmation behavior is preserved. Each open file also has a **Copy path** action for copying its full filesystem path.
 
 ## Editor modes
 
@@ -129,7 +144,7 @@ Real Electron UI validation:
 npm run test:ui
 ```
 
-The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test opens real HTML fixtures, verifies the displayed version, edits both Visual Compare panes, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, edits visible text, validates Edit/Preview behavior and Editor diff navigation/rail markers. CI also keeps validation screenshots as an artifact.
+The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, edits visible text, validates Edit/Preview behavior and Editor diff navigation/rail markers. CI also keeps validation screenshots as an artifact.
 
 ## Build for Windows
 

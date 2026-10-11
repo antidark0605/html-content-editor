@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { diffLines } from 'diff';
 import {
@@ -15,6 +16,7 @@ import {
   mergeVisibleTextHunk
 } from './compare-model.mjs';
 import { firstUsableDirectory } from './open-path.mjs';
+import { BUILD_COMMIT } from './build-info.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +27,34 @@ let compareUndoStack = [];
 let compareRedoStack = [];
 let settings = {};
 let allowClose = false;
+
+const PROJECT_URL = 'https://github.com/antidark0605/html-content-editor';
+const ISSUES_URL = PROJECT_URL + '/issues';
+const LICENSE_URL = PROJECT_URL + '/blob/main/LICENSE';
+
+function appInfoPayload() {
+  return {
+    name: 'HTML Content Editor',
+    version: app.getVersion(),
+    buildCommit: BUILD_COMMIT,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: os.release(),
+    license: 'MIT',
+    projectUrl: PROJECT_URL,
+    issuesUrl: ISSUES_URL,
+    licenseUrl: LICENSE_URL
+  };
+}
+
+function isHtmlFilePath(filePath) {
+  if (typeof filePath !== 'string' || filePath.length === 0) return false;
+  const extension = path.extname(filePath).toLowerCase();
+  return extension === '.html' || extension === '.htm';
+}
 
 function settingsFilePath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -138,6 +168,60 @@ function makeSession(filePath, source) {
 async function readHtmlFile(filePath) {
   const source = await fsp.readFile(filePath, 'utf8');
   return makeSession(filePath, source);
+}
+
+async function openDroppedPath(target, filePath) {
+  if (!isHtmlFilePath(filePath)) {
+    return { ok: false, reason: 'Drop a single .html or .htm file.' };
+  }
+
+  try {
+    const info = await fsp.stat(filePath);
+    if (!info.isFile()) {
+      return { ok: false, reason: 'The dropped item is not a file.' };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  if (target === 'editor') {
+    if (!confirmEditorDiscardOrSave()) return { ok: false, cancelled: true };
+
+    try {
+      const payload = await readHtmlFile(filePath);
+      await rememberOpenDirectory(filePath);
+      return { ok: true, target, session: payload };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  if (target === 'left' || target === 'right') {
+    if (!confirmCompareDiscardOrSave(target)) return { ok: false, cancelled: true };
+
+    try {
+      await readCompareFile(target, filePath);
+      await rememberOpenDirectory(filePath);
+      return {
+        ok: true,
+        target,
+        ...compareResultPayload()
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  return { ok: false, reason: 'Invalid drop target.' };
 }
 
 function normalizeCompareSide(side) {
@@ -414,6 +498,10 @@ ipcMain.handle('file:open', async () => {
   }
 });
 
+ipcMain.handle('file:open-dropped', async (_event, target, filePath) => {
+  return openDroppedPath(target, filePath);
+});
+
 ipcMain.handle('compare:open', async (_event, requestedSide) => {
   const side = normalizeCompareSide(requestedSide);
   if (!confirmCompareDiscardOrSave(side)) return { cancelled: true };
@@ -675,7 +763,37 @@ ipcMain.handle('html:diff-analysis', async (_event, workingSource) => {
 });
 
 ipcMain.handle('app:get-session', async () => sessionPayload());
-ipcMain.handle('app:get-version', async () => app.getVersion());
+ipcMain.handle('app:get-info', async () => appInfoPayload());
+
+ipcMain.handle('app:copy-path', async (_event, target) => {
+  let filePath = null;
+
+  if (target === 'editor') {
+    filePath = session?.filePath ?? null;
+  } else if (target === 'left' || target === 'right') {
+    filePath = compareSlots[target]?.filePath ?? null;
+  }
+
+  if (!filePath) {
+    return { ok: false, reason: 'No file is open for this item.' };
+  }
+
+  clipboard.writeText(filePath);
+  return { ok: true, filePath };
+});
+
+ipcMain.handle('app:open-link', async (_event, target) => {
+  const urls = {
+    project: PROJECT_URL,
+    issues: ISSUES_URL,
+    license: LICENSE_URL
+  };
+  const url = urls[target];
+  if (!url) return { ok: false };
+
+  await shell.openExternal(url);
+  return { ok: true };
+});
 
 app.whenReady().then(async () => {
   await loadSettings();

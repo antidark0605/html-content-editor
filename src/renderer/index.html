@@ -14,10 +14,13 @@
       <span class="tagline">Edit text. Preserve layout.</span>
     </div>
 
-    <div id="editorFileActions" class="file-actions">
-      <button id="openButton" class="primary">Open HTML</button>
-      <button id="saveButton" disabled>Save</button>
-      <button id="saveAsButton" disabled>Save As</button>
+    <div class="header-actions">
+      <div id="editorFileActions" class="file-actions">
+        <button id="openButton" class="primary">Open HTML</button>
+        <button id="saveButton" disabled>Save</button>
+        <button id="saveAsButton" disabled>Save As</button>
+      </div>
+      <button id="aboutButton" title="About HTML Content Editor">About</button>
     </div>
   </header>
 
@@ -103,6 +106,7 @@
       <div class="status-bar">
         <div>
           <span id="fileName" class="file-name"></span>
+          <button id="copyEditorPathButton" class="compact-action" title="Copy full file path" disabled>Copy path</button>
           <span id="dirtyBadge" class="dirty-badge hidden">Unsaved</span>
         </div>
         <div class="status-right">
@@ -136,6 +140,7 @@
             <button id="openCompareLeftButton" class="primary">Open</button>
             <button id="reloadCompareLeftButton" disabled>Reload</button>
             <button id="saveCompareLeftButton" disabled>Save</button>
+            <button id="copyCompareLeftPathButton" class="compact-action" title="Copy full left file path" disabled>Copy path</button>
           </div>
         </div>
 
@@ -151,6 +156,7 @@
             <button id="openCompareRightButton" class="primary">Open</button>
             <button id="reloadCompareRightButton" disabled>Reload</button>
             <button id="saveCompareRightButton" disabled>Save</button>
+            <button id="copyCompareRightPathButton" class="compact-action" title="Copy full right file path" disabled>Copy path</button>
           </div>
         </div>
       </div>
@@ -165,6 +171,54 @@
       <div id="differenceRail" class="difference-rail" aria-label="Difference overview"></div>
     </section>
   </main>
+
+  <div id="dropOverlay" class="drop-overlay hidden" aria-hidden="true">
+    <div id="dropEditorLayout" class="drop-layout">
+      <div class="drop-zone" data-drop-target="editor">
+        <strong>Drop HTML here</strong>
+        <span>Open in Editor</span>
+      </div>
+    </div>
+    <div id="dropCompareLayout" class="drop-layout compare-drop-layout hidden">
+      <div class="drop-zone" data-drop-target="left">
+        <strong>Drop HTML here</strong>
+        <span>Open as Left</span>
+      </div>
+      <div class="drop-zone" data-drop-target="right">
+        <strong>Drop HTML here</strong>
+        <span>Open as Right</span>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="aboutDialog" class="about-dialog">
+    <div class="about-header">
+      <div>
+        <h2>HTML Content Editor</h2>
+        <p>Edit text. Preserve layout.</p>
+      </div>
+      <button id="closeAboutButton" class="icon-button" title="Close About" aria-label="Close About">×</button>
+    </div>
+
+    <div class="about-version">
+      <strong id="aboutVersion">Version 0.0.0</strong>
+      <span id="aboutBuild">Build development</span>
+    </div>
+
+    <dl class="about-details">
+      <div><dt>Electron</dt><dd id="aboutElectron"></dd></div>
+      <div><dt>Chrome</dt><dd id="aboutChrome"></dd></div>
+      <div><dt>Node.js</dt><dd id="aboutNode"></dd></div>
+      <div><dt>Platform</dt><dd id="aboutPlatform"></dd></div>
+      <div><dt>License</dt><dd>MIT</dd></div>
+    </dl>
+
+    <div class="about-actions">
+      <button data-about-link="project">GitHub Project</button>
+      <button data-about-link="issues">Report Issue</button>
+      <button data-about-link="license">MIT License</button>
+    </div>
+  </dialog>
 
   <div id="toast" class="toast hidden" role="status"></div>
 

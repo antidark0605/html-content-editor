@@ -12,10 +12,16 @@ const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hce-ui-'));
 const left = path.join(tempDir, 'compare-left.html');
 const right = path.join(tempDir, 'compare-right.html');
 const editorFile = path.join(tempDir, 'editor.html');
+const droppedEditor = path.join(tempDir, 'drop-editor.html');
+const droppedLeft = path.join(tempDir, 'drop-left.html');
+const droppedRight = path.join(tempDir, 'drop-right.html');
 
 await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), left);
 await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), right);
 await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), editorFile);
+await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), droppedEditor);
+await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), droppedLeft);
+await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), droppedRight);
 
 const electronApp = await electron.launch({
   args: [
@@ -42,13 +48,73 @@ function historyCount(text, name) {
   return match ? Number(match[1]) : 0;
 }
 
+async function dropFile(page, filePath, target) {
+  await page.evaluate(() => {
+    document.querySelector('#uiDropInput')?.remove();
+    const input = document.createElement('input');
+    input.id = 'uiDropInput';
+    input.type = 'file';
+    input.hidden = true;
+    document.body.append(input);
+  });
+
+  await page.locator('#uiDropInput').setInputFiles(filePath);
+
+  await page.evaluate(() => {
+    const input = document.querySelector('#uiDropInput');
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(input.files[0]);
+    document.dispatchEvent(new DragEvent('dragenter', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer
+    }));
+  });
+
+  await page.waitForSelector('#dropOverlay:not(.hidden)');
+
+  await page.evaluate((dropTarget) => {
+    const input = document.querySelector('#uiDropInput');
+    const zone = document.querySelector(`[data-drop-target="${dropTarget}"]`);
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(input.files[0]);
+    zone.dispatchEvent(new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer
+    }));
+  }, target);
+
+  await page.waitForFunction(() =>
+    document.querySelector('#dropOverlay')?.classList.contains('hidden')
+  );
+}
+
 try {
   const page = await electronApp.firstWindow();
 
   await page.waitForFunction(() =>
-    document.querySelector('#appVersion')?.textContent === 'v0.5.0'
+    document.querySelector('#appVersion')?.textContent === 'v0.6.0'
   );
-  assert.equal(await page.locator('#appVersion').textContent(), 'v0.5.0');
+  assert.equal(await page.locator('#appVersion').textContent(), 'v0.6.0');
+
+  await page.locator('#aboutButton').click();
+  await page.waitForSelector('#aboutDialog[open]');
+  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.6.0');
+  assert.match(await page.locator('#aboutBuild').textContent() ?? '', /^Build (development|[0-9a-f]{8})$/);
+  assert.ok((await page.locator('#aboutElectron').textContent())?.length > 0);
+  assert.ok((await page.locator('#aboutPlatform').textContent())?.includes('win32'));
+  assert.equal(await page.locator('[data-about-link="project"]').count(), 1);
+  assert.equal(await page.locator('[data-about-link="issues"]').count(), 1);
+  assert.equal(await page.locator('[data-about-link="license"]').count(), 1);
+
+  await page.screenshot({
+    path: path.join(outputDir, 'about.png'),
+    fullPage: true
+  });
+
+  await page.locator('#closeAboutButton').click();
+  await page.waitForFunction(() => !document.querySelector('#aboutDialog')?.open);
 
   await page.waitForSelector('#compareWorkspace:not(.hidden)');
   await page.waitForFunction(() => {
@@ -58,6 +124,10 @@ try {
 
   const countText = await page.locator('#differenceCount').textContent();
   assert.match(countText ?? '', /\d+\s*\/\s*\d+/);
+
+  await page.locator('#copyCompareLeftPathButton').click();
+  const copiedLeftPath = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+  assert.equal(copiedLeftPath, left);
 
   const leftFrameHandle = await page.$('#compareLeftFrame');
   const rightFrameHandle = await page.$('#compareRightFrame');
@@ -388,6 +458,38 @@ try {
   await page.waitForFunction(() =>
     document.querySelector('#dirtyBadge')?.classList.contains('hidden')
   );
+
+  await page.locator('#copyEditorPathButton').click();
+  const copiedEditorPath = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+  assert.equal(copiedEditorPath, editorFile);
+
+  await dropFile(page, droppedEditor, 'editor');
+  await page.waitForFunction((name) =>
+    document.querySelector('#fileName')?.textContent === name
+  , path.basename(droppedEditor));
+  assert.equal(await page.locator('#fileName').textContent(), path.basename(droppedEditor));
+
+  await page.locator('[data-workspace-mode="compare"]').click();
+  await page.waitForSelector('#compareWorkspace:not(.hidden)');
+
+  await dropFile(page, droppedLeft, 'left');
+  await page.waitForFunction((name) =>
+    document.querySelector('#compareLeftName')?.textContent === name
+  , path.basename(droppedLeft));
+
+  await dropFile(page, droppedRight, 'right');
+  await page.waitForFunction((name) =>
+    document.querySelector('#compareRightName')?.textContent === name
+  , path.basename(droppedRight));
+
+  await page.locator('#copyCompareRightPathButton').click();
+  const copiedRightPath = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+  assert.equal(copiedRightPath, droppedRight);
+
+  await page.screenshot({
+    path: path.join(outputDir, 'drag-drop.png'),
+    fullPage: true
+  });
 } finally {
   await electronApp.close();
   await fs.rm(tempDir, { recursive: true, force: true });
