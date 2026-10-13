@@ -15,6 +15,8 @@ const editorFile = path.join(tempDir, 'editor.html');
 const droppedEditor = path.join(tempDir, 'drop-editor.html');
 const droppedLeft = path.join(tempDir, 'drop-left.html');
 const droppedRight = path.join(tempDir, 'drop-right.html');
+const alignmentLeft = path.join(tempDir, 'alignment-left.html');
+const alignmentRight = path.join(tempDir, 'alignment-right.html');
 
 await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), left);
 await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), right);
@@ -22,6 +24,23 @@ await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), editorFile);
 await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), droppedEditor);
 await fs.copyFile(path.join(root, 'samples', 'compare-left.html'), droppedLeft);
 await fs.copyFile(path.join(root, 'samples', 'compare-right.html'), droppedRight);
+
+await fs.writeFile(alignmentLeft, [
+  '<!doctype html><html><body><nav>',
+  '<a href="#flows">06 · 配對、資料流與信任邊界</a>',
+  '<a href="#comparison">07 · 兩套 SDK 比較</a>',
+  '<a href="#market">08 · 生態與產品地圖</a>',
+  '</nav></body></html>'
+].join(''), 'utf8');
+
+await fs.writeFile(alignmentRight, [
+  '<!doctype html><html><body><nav>',
+  '<a href="#flows">06 · 配對與資料流</a>',
+  '<a href="#security">07 · 安全機制</a>',
+  '<a href="#comparison">08 · 兩套 SDK 比較</a>',
+  '<a href="#market">09 · 生態與產品地圖</a>',
+  '</nav></body></html>'
+].join(''), 'utf8');
 
 const electronApp = await electron.launch({
   args: [
@@ -94,13 +113,13 @@ try {
   const page = await electronApp.firstWindow();
 
   await page.waitForFunction(() =>
-    document.querySelector('#appVersion')?.textContent === 'v0.6.0'
+    document.querySelector('#appVersion')?.textContent === 'v0.6.1'
   );
-  assert.equal(await page.locator('#appVersion').textContent(), 'v0.6.0');
+  assert.equal(await page.locator('#appVersion').textContent(), 'v0.6.1');
 
   await page.locator('#aboutButton').click();
   await page.waitForSelector('#aboutDialog[open]');
-  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.6.0');
+  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.6.1');
   assert.match(await page.locator('#aboutBuild').textContent() ?? '', /^Build (development|[0-9a-f]{8})$/);
   assert.ok((await page.locator('#aboutElectron').textContent())?.length > 0);
   assert.ok((await page.locator('#aboutPlatform').textContent())?.includes('win32'));
@@ -488,6 +507,49 @@ try {
 
   await page.screenshot({
     path: path.join(outputDir, 'drag-drop.png'),
+    fullPage: true
+  });
+
+  // Regression: an inserted TOC entry must not make neighboring stable links unmergeable.
+  await dropFile(page, alignmentLeft, 'left');
+  await dropFile(page, alignmentRight, 'right');
+  await page.locator('[data-compare-view="visual"]').click();
+
+  await page.waitForFunction(() =>
+    document.querySelector('#differenceCount')?.textContent === '1 / 4' &&
+    document.querySelectorAll('#visualMergeGutter .visual-merge-pair button').length === 2
+  );
+
+  let regressionButtons = page.locator('#visualMergeGutter .visual-merge-pair button');
+  assert.equal(await regressionButtons.nth(0).isDisabled(), false);
+  assert.equal(await regressionButtons.nth(1).isDisabled(), false);
+
+  await page.locator('#nextDifferenceButton').click();
+  await page.waitForFunction(() => {
+    const buttons = [...document.querySelectorAll('#visualMergeGutter .visual-merge-pair button')];
+    return document.querySelector('#differenceCount')?.textContent === '2 / 4' &&
+      buttons.length === 2 &&
+      buttons.every((button) => button.disabled);
+  });
+
+  regressionButtons = page.locator('#visualMergeGutter .visual-merge-pair button');
+  assert.equal(await regressionButtons.nth(0).isDisabled(), true);
+  assert.equal(await regressionButtons.nth(1).isDisabled(), true);
+
+  await page.locator('#nextDifferenceButton').click();
+  await page.waitForFunction(() => {
+    const buttons = [...document.querySelectorAll('#visualMergeGutter .visual-merge-pair button')];
+    return document.querySelector('#differenceCount')?.textContent === '3 / 4' &&
+      buttons.length === 2 &&
+      buttons.every((button) => !button.disabled);
+  });
+
+  regressionButtons = page.locator('#visualMergeGutter .visual-merge-pair button');
+  assert.equal(await regressionButtons.nth(0).isDisabled(), false);
+  assert.equal(await regressionButtons.nth(1).isDisabled(), false);
+
+  await page.screenshot({
+    path: path.join(outputDir, 'compare-visual-insert-alignment.png'),
     fullPage: true
   });
 } finally {

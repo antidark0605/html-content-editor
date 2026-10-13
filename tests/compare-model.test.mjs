@@ -35,6 +35,68 @@ test('visual text merge preserves target markup while copying text', () => {
   assert.doesNotMatch(merged.rightSource, /class="left"/);
 });
 
+test('visual comparison keeps stable links mergeable around an inserted navigation item', () => {
+  const left = [
+    '<nav>',
+    '<a href="#flows">06 · 配對、資料流與信任邊界</a>',
+    '<a href="#comparison">07 · 兩套 SDK 比較</a>',
+    '<a href="#market">08 · 生態與產品地圖</a>',
+    '</nav>'
+  ].join('');
+
+  const right = [
+    '<nav>',
+    '<a href="#flows">06 · 配對與資料流</a>',
+    '<a href="#security">07 · 安全機制</a>',
+    '<a href="#comparison">08 · 兩套 SDK 比較</a>',
+    '<a href="#market">09 · 生態與產品地圖</a>',
+    '</nav>'
+  ].join('');
+
+  const comparison = buildVisibleComparison(left, right);
+
+  assert.equal(comparison.hunks.length, 4);
+
+  const flows = comparison.hunks.find((hunk) => hunk.leftPreview.includes('配對'));
+  const security = comparison.hunks.find((hunk) => hunk.rightPreview.includes('安全機制'));
+  const sdk = comparison.hunks.find((hunk) => hunk.leftPreview.includes('兩套 SDK 比較'));
+  const market = comparison.hunks.find((hunk) => hunk.leftPreview.includes('生態與產品地圖'));
+
+  assert.equal(flows?.mergeableText, true);
+  assert.equal(security?.mergeableText, false);
+  assert.equal(security?.leftCount, 0);
+  assert.equal(security?.rightCount, 1);
+  assert.equal(sdk?.mergeableText, true);
+  assert.equal(market?.mergeableText, true);
+});
+
+test('visual merge copies renumbered linked text without replacing the target anchor structure', () => {
+  const left = '<nav><a class="left" href="#comparison">07 · 兩套 SDK 比較</a></nav>';
+  const right = '<nav><a class="right" href="#comparison">08 · 兩套 SDK 比較</a></nav>';
+  const comparison = buildVisibleComparison(left, right);
+  const hunk = comparison.hunks[0];
+
+  assert.equal(hunk.mergeableText, true);
+
+  const merged = mergeVisibleTextHunk(left, right, hunk.id, 'left-to-right');
+
+  assert.equal(merged.ok, true);
+  assert.match(merged.rightSource, /class="right"/);
+  assert.match(merged.rightSource, /href="#comparison"/);
+  assert.match(merged.rightSource, />07 · 兩套 SDK 比較<\/a>/);
+  assert.doesNotMatch(merged.rightSource, /class="left"/);
+});
+
+test('visual comparison still ignores href-only changes when visible text is unchanged', () => {
+  const left = '<nav><a href="#old">Same label</a></nav>';
+  const right = '<nav><a href="#new">Same label</a></nav>';
+
+  const comparison = buildVisibleComparison(left, right);
+
+  assert.equal(comparison.hunks.length, 0);
+  assert.ok(comparison.anchors.length >= 1);
+});
+
 test('source comparison creates aligned rows and can merge structural changes', () => {
   const left = '<main>\n  <h1>Title</h1>\n  <p>Alpha</p>\n</main>\n';
   const right = '<main>\n  <h1>Title</h1>\n  <p>Beta</p>\n  <p>Extra</p>\n</main>\n';
