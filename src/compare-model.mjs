@@ -69,6 +69,63 @@ function buildSequenceHunks(leftValues, rightValues) {
   return { hunks, anchors };
 }
 
+function visibleAlignmentToken(node) {
+  return node.alignmentKey
+    ? `semantic:${node.alignmentKey}`
+    : `text:${node.text}`;
+}
+
+function buildVisibleNodeSequence(leftNodes, rightNodes) {
+  const raw = buildSequenceHunks(
+    leftNodes.map(visibleAlignmentToken),
+    rightNodes.map(visibleAlignmentToken)
+  );
+
+  const anchors = [];
+  const hunks = raw.hunks.map((hunk) => ({
+    leftStart: hunk.leftStart,
+    leftCount: hunk.leftCount,
+    rightStart: hunk.rightStart,
+    rightCount: hunk.rightCount,
+    kind: hunk.kind
+  }));
+
+  for (const anchor of raw.anchors) {
+    const leftNode = leftNodes[anchor.leftIndex];
+    const rightNode = rightNodes[anchor.rightIndex];
+
+    if (!leftNode || !rightNode) continue;
+
+    if (leftNode.text === rightNode.text) {
+      anchors.push(anchor);
+      continue;
+    }
+
+    hunks.push({
+      leftStart: anchor.leftIndex,
+      leftCount: 1,
+      rightStart: anchor.rightIndex,
+      rightCount: 1,
+      kind: 'changed'
+    });
+  }
+
+  hunks.sort((a, b) =>
+    a.leftStart - b.leftStart ||
+    a.rightStart - b.rightStart ||
+    a.leftCount - b.leftCount ||
+    a.rightCount - b.rightCount
+  );
+
+  return {
+    anchors,
+    hunks: hunks.map((hunk, index) => ({
+      ...hunk,
+      id: `diff-${index + 1}`
+    }))
+  };
+}
+
 function inlineParts(leftText, rightText) {
   const parts = diffWordsWithSpace(leftText, rightText);
 
@@ -127,9 +184,7 @@ function instrumentVisibleSide(source, nodes, annotations) {
 export function buildVisibleComparison(leftSource, rightSource) {
   const leftNodes = extractEditableTextNodes(leftSource);
   const rightNodes = extractEditableTextNodes(rightSource);
-  const leftTexts = leftNodes.map((node) => node.text);
-  const rightTexts = rightNodes.map((node) => node.text);
-  const sequence = buildSequenceHunks(leftTexts, rightTexts);
+  const sequence = buildVisibleNodeSequence(leftNodes, rightNodes);
 
   const leftAnnotations = {};
   const rightAnnotations = {};
