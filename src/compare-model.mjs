@@ -69,16 +69,26 @@ function buildSequenceHunks(leftValues, rightValues) {
   return { hunks, anchors };
 }
 
-function visibleAlignmentToken(node) {
-  return node.alignmentKey
+function visibleAlignmentToken(node, sharedSemanticKeys) {
+  return node.alignmentKey && sharedSemanticKeys.has(node.alignmentKey)
     ? `semantic:${node.alignmentKey}`
     : `text:${node.text}`;
 }
 
 function buildVisibleNodeSequence(leftNodes, rightNodes) {
+  const leftSemanticKeys = new Set(
+    leftNodes.map((node) => node.alignmentKey).filter(Boolean)
+  );
+  const rightSemanticKeys = new Set(
+    rightNodes.map((node) => node.alignmentKey).filter(Boolean)
+  );
+  const sharedSemanticKeys = new Set(
+    [...leftSemanticKeys].filter((key) => rightSemanticKeys.has(key))
+  );
+
   const raw = buildSequenceHunks(
-    leftNodes.map(visibleAlignmentToken),
-    rightNodes.map(visibleAlignmentToken)
+    leftNodes.map((node) => visibleAlignmentToken(node, sharedSemanticKeys)),
+    rightNodes.map((node) => visibleAlignmentToken(node, sharedSemanticKeys))
   );
 
   const anchors = [];
