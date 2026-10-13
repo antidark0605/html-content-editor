@@ -35,6 +35,36 @@ function trimAsciiWhitespace(value) {
   return value.slice(left, right);
 }
 
+function attributeValue(node, name) {
+  return node?.attrs?.find((attr) => attr.name === name)?.value ?? null;
+}
+
+function semanticAlignmentBase(ancestors) {
+  for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+    const element = ancestors[index];
+    const tagName = typeof element?.tagName === 'string'
+      ? element.tagName.toLowerCase()
+      : null;
+
+    if (tagName === 'a') {
+      const href = attributeValue(element, 'href');
+      if (href) return `anchor:${href}`;
+    }
+  }
+
+  const parent = ancestors.at(-1);
+  const parentTag = typeof parent?.tagName === 'string'
+    ? parent.tagName.toLowerCase()
+    : null;
+  const parentId = attributeValue(parent, 'id');
+
+  if (parentTag && parentId) {
+    return `element:${parentTag}#${parentId}`;
+  }
+
+  return null;
+}
+
 export function escapeHtmlText(value) {
   return value
     .replaceAll('&', '&amp;')
@@ -45,9 +75,10 @@ export function escapeHtmlText(value) {
 export function extractEditableTextNodes(source) {
   const document = parse(source, { sourceCodeLocationInfo: true });
   const editable = [];
+  const semanticOccurrences = new Map();
   let nextId = 1;
 
-  function visit(node, blockedByAncestor = false) {
+  function visit(node, blockedByAncestor = false, ancestors = []) {
     const tagName = typeof node.tagName === 'string' ? node.tagName.toLowerCase() : null;
     const blockedHere = blockedByAncestor || (tagName !== null && BLOCKED_TAGS.has(tagName));
 
@@ -70,22 +101,34 @@ export function extractEditableTextNodes(source) {
         const text = trimAsciiWhitespace(node.value ?? '');
 
         if (text.length > 0) {
+          const semanticBase = semanticAlignmentBase(ancestors);
+          let alignmentKey = null;
+
+          if (semanticBase) {
+            const occurrence = (semanticOccurrences.get(semanticBase) ?? 0) + 1;
+            semanticOccurrences.set(semanticBase, occurrence);
+            alignmentKey = `${semanticBase}::${occurrence}`;
+          }
+
           editable.push({
             id: `text-${nextId++}`,
             start,
             end,
-            text
+            text,
+            alignmentKey
           });
         }
       }
     }
 
+    const nextAncestors = tagName ? [...ancestors, node] : ancestors;
+
     for (const child of node.childNodes ?? []) {
-      visit(child, blockedHere);
+      visit(child, blockedHere, nextAncestors);
     }
 
     if (node.content) {
-      visit(node.content, blockedHere);
+      visit(node.content, blockedHere, nextAncestors);
     }
   }
 
