@@ -87,6 +87,16 @@ test('visual merge copies renumbered linked text without replacing the target an
   assert.doesNotMatch(merged.rightSource, /class="left"/);
 });
 
+test('visual comparison still ignores href-only changes when visible text is unchanged', () => {
+  const left = '<nav><a href="#old">Same label</a></nav>';
+  const right = '<nav><a href="#new">Same label</a></nav>';
+
+  const comparison = buildVisibleComparison(left, right);
+
+  assert.equal(comparison.hunks.length, 0);
+  assert.ok(comparison.anchors.length >= 1);
+});
+
 test('source comparison creates aligned rows and can merge structural changes', () => {
   const left = '<main>\n  <h1>Title</h1>\n  <p>Alpha</p>\n</main>\n';
   const right = '<main>\n  <h1>Title</h1>\n  <p>Beta</p>\n  <p>Extra</p>\n</main>\n';
