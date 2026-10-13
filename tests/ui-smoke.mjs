@@ -525,18 +525,24 @@ try {
   assert.equal(await regressionButtons.nth(1).isDisabled(), false);
 
   await page.locator('#nextDifferenceButton').click();
-  await page.waitForFunction(() =>
-    document.querySelector('#differenceCount')?.textContent === '2 / 4'
-  );
+  await page.waitForFunction(() => {
+    const buttons = [...document.querySelectorAll('#visualMergeGutter .visual-merge-pair button')];
+    return document.querySelector('#differenceCount')?.textContent === '2 / 4' &&
+      buttons.length === 2 &&
+      buttons.every((button) => button.disabled);
+  });
 
   regressionButtons = page.locator('#visualMergeGutter .visual-merge-pair button');
   assert.equal(await regressionButtons.nth(0).isDisabled(), true);
   assert.equal(await regressionButtons.nth(1).isDisabled(), true);
 
   await page.locator('#nextDifferenceButton').click();
-  await page.waitForFunction(() =>
-    document.querySelector('#differenceCount')?.textContent === '3 / 4'
-  );
+  await page.waitForFunction(() => {
+    const buttons = [...document.querySelectorAll('#visualMergeGutter .visual-merge-pair button')];
+    return document.querySelector('#differenceCount')?.textContent === '3 / 4' &&
+      buttons.length === 2 &&
+      buttons.every((button) => !button.disabled);
+  });
 
   regressionButtons = page.locator('#visualMergeGutter .visual-merge-pair button');
   assert.equal(await regressionButtons.nth(0).isDisabled(), false);
