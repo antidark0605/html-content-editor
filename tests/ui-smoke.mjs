@@ -62,6 +62,25 @@ async function editTextNode(frame, selector, replacement) {
   }, replacement);
 }
 
+async function selectTextRange(frame, selector, start, end) {
+  const target = frame.locator(selector).first();
+  await target.waitFor();
+
+  await target.evaluate((element, offsets) => {
+    const textNode = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+    if (!textNode) throw new Error('Expected a direct text node for formatting test.');
+
+    const range = document.createRange();
+    range.setStart(textNode, offsets.start);
+    range.setEnd(textNode, offsets.end);
+
+    const selection = document.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }, { start, end });
+}
+
 function historyCount(text, name) {
   const match = new RegExp(`${name} \\((\\d+)\\)`).exec(text ?? '');
   return match ? Number(match[1]) : 0;
@@ -113,13 +132,13 @@ try {
   const page = await electronApp.firstWindow();
 
   await page.waitForFunction(() =>
-    document.querySelector('#appVersion')?.textContent === 'v0.6.2'
+    document.querySelector('#appVersion')?.textContent === 'v0.7.0'
   );
-  assert.equal(await page.locator('#appVersion').textContent(), 'v0.6.2');
+  assert.equal(await page.locator('#appVersion').textContent(), 'v0.7.0');
 
   await page.locator('#aboutButton').click();
   await page.waitForSelector('#aboutDialog[open]');
-  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.6.2');
+  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.7.0');
   assert.match(await page.locator('#aboutBuild').textContent() ?? '', /^Build (development|[0-9a-f]{8})$/);
   assert.ok((await page.locator('#aboutElectron').textContent())?.length > 0);
   assert.ok((await page.locator('#aboutPlatform').textContent())?.includes('win32'));
@@ -426,6 +445,89 @@ try {
   await editorFrame.waitForSelector('[data-hce-id]');
 
   assert.equal(await page.locator('#editorModeHint').textContent(), 'Editable view');
+  assert.equal(await page.locator('#formatToolbar').isVisible(), true);
+  assert.equal(await page.locator('[data-text-format="bold"]').isDisabled(), true);
+
+  // Rich text formatting is selection-based and patches only the selected text.
+  await selectTextRange(
+    editorFrame,
+    '[data-hce-id]:has-text("HTML Compare Demo")',
+    0,
+    4
+  );
+  await page.waitForFunction(() => !document.querySelector('[data-text-format="bold"]')?.disabled);
+  await page.locator('[data-text-format="bold"]').click();
+  await editorFrame.waitForSelector('span[style*="font-weight: 700"]');
+  assert.equal(
+    await editorFrame.locator('span[style*="font-weight: 700"]').first().textContent(),
+    'HTML'
+  );
+
+  // Formatting participates in the same Editor Undo/Redo history.
+  await page.locator('#undoButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#redoButton')?.disabled === false
+  );
+  assert.equal(await editorFrame.locator('span[style*="font-weight: 700"]').count(), 0);
+
+  await page.locator('#redoButton').click();
+  await editorFrame.waitForSelector('span[style*="font-weight: 700"]');
+
+  await selectTextRange(
+    editorFrame,
+    '[data-hce-id]:has-text("Compare Demo")',
+    0,
+    7
+  );
+  await page.locator('[data-text-format="italic"]').click();
+  await editorFrame.waitForSelector('span[style*="font-style: italic"]');
+
+  await selectTextRange(
+    editorFrame,
+    '[data-hce-id]:has-text("Demo")',
+    0,
+    4
+  );
+  await page.locator('[data-text-format="underline"]').click();
+  await editorFrame.waitForSelector('span[style*="text-decoration: underline"]');
+
+  await selectTextRange(
+    editorFrame,
+    '[data-hce-id]:has-text("Architecture")',
+    0,
+    12
+  );
+  await page.locator('#formatFontSize').selectOption('20px');
+  await editorFrame.waitForSelector('span[style*="font-size: 20px"]');
+
+  await selectTextRange(
+    editorFrame,
+    '[data-hce-id]:has-text("Benchmark")',
+    0,
+    9
+  );
+  await page.locator('#formatTextColor').evaluate((element) => {
+    element.value = '#d32f2f';
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await editorFrame.waitForSelector('span[style*="color: #d32f2f"]');
+
+  await selectTextRange(
+    editorFrame,
+    '[data-hce-id]:has-text("Notes")',
+    0,
+    5
+  );
+  await page.locator('#formatBackgroundColor').evaluate((element) => {
+    element.value = '#fff2a8';
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await editorFrame.waitForSelector('span[style*="background-color: #fff2a8"]');
+
+  await page.screenshot({
+    path: path.join(outputDir, 'editor-formatting.png'),
+    fullPage: true
+  });
 
   await editTextNode(
     editorFrame,
