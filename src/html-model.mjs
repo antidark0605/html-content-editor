@@ -193,3 +193,91 @@ export function buildEditableHtml(source, textNodes, edits = {}) {
   parts.push(source.slice(cursor));
   return parts.join('');
 }
+
+
+const INLINE_FONT_SIZES = new Set([
+  '12px',
+  '14px',
+  '16px',
+  '18px',
+  '20px',
+  '24px',
+  '28px',
+  '32px'
+]);
+
+function inlineFormatStyle(format, value) {
+  if (format === 'bold') return 'font-weight: 700;';
+  if (format === 'italic') return 'font-style: italic;';
+  if (format === 'underline') return 'text-decoration: underline;';
+
+  if (format === 'fontSize') {
+    if (!INLINE_FONT_SIZES.has(value)) {
+      throw new Error('Unsupported font size.');
+    }
+    return `font-size: ${value};`;
+  }
+
+  if (format === 'color' || format === 'backgroundColor') {
+    if (typeof value !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value)) {
+      throw new Error('Invalid color value.');
+    }
+
+    return format === 'color'
+      ? `color: ${value.toLowerCase()};`
+      : `background-color: ${value.toLowerCase()};`;
+  }
+
+  throw new Error('Unsupported text formatting operation.');
+}
+
+export function applyInlineFormatting(
+  source,
+  {
+    nodeId,
+    expectedText,
+    start,
+    end,
+    format,
+    value = null
+  } = {}
+) {
+  if (typeof source !== 'string') {
+    throw new Error('Invalid HTML source.');
+  }
+
+  if (typeof nodeId !== 'string' || typeof expectedText !== 'string') {
+    throw new Error('Invalid text formatting target.');
+  }
+
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start) {
+    throw new Error('Select some text before applying formatting.');
+  }
+
+  const textNodes = extractEditableTextNodes(source);
+  const node = textNodes.find((candidate) => candidate.id === nodeId);
+
+  if (!node) {
+    throw new Error('The selected text block no longer exists. Select the text again.');
+  }
+
+  if (node.text !== expectedText) {
+    throw new Error('The selected text changed before formatting. Select it again.');
+  }
+
+  if (end > expectedText.length) {
+    throw new Error('The selected text range is no longer valid.');
+  }
+
+  const style = inlineFormatStyle(format, value);
+  const before = escapeHtmlText(expectedText.slice(0, start));
+  const selected = escapeHtmlText(expectedText.slice(start, end));
+  const after = escapeHtmlText(expectedText.slice(end));
+  const replacement = `${before}<span style="${style}">${selected}</span>${after}`;
+
+  return (
+    source.slice(0, node.start) +
+    replacement +
+    source.slice(node.end)
+  );
+}
