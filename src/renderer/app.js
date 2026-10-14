@@ -46,8 +46,17 @@ const elements = {
   formatToolbar: document.querySelector('#formatToolbar'),
   formatButtons: [...document.querySelectorAll('[data-text-format]')],
   formatFontSize: document.querySelector('#formatFontSize'),
-  formatTextColor: document.querySelector('#formatTextColor'),
-  formatBackgroundColor: document.querySelector('#formatBackgroundColor'),
+  textColorButton: document.querySelector('#textColorButton'),
+  backgroundColorButton: document.querySelector('#backgroundColorButton'),
+  textColorPreview: document.querySelector('#textColorPreview'),
+  backgroundColorPreview: document.querySelector('#backgroundColorPreview'),
+  colorPalette: document.querySelector('#colorPalette'),
+  colorPaletteTitle: document.querySelector('#colorPaletteTitle'),
+  colorPaletteModeHint: document.querySelector('#colorPaletteModeHint'),
+  themeColorGrid: document.querySelector('#themeColorGrid'),
+  standardColorGrid: document.querySelector('#standardColorGrid'),
+  otherColorsButton: document.querySelector('#otherColorsButton'),
+  otherColorsInput: document.querySelector('#otherColorsInput'),
   formatSelectionHint: document.querySelector('#formatSelectionHint'),
   insertTableButton: document.querySelector('#insertTableButton'),
   tableContextTools: document.querySelector('#tableContextTools'),
@@ -121,6 +130,10 @@ const state = {
   tables: [],
   workingSource: '',
   richSelection: null,
+  editorCaret: null,
+  colorPaletteTarget: null,
+  currentTextColor: '#d32f2f',
+  currentBackgroundColor: '#fff2a8',
   tableSelection: null,
   lastEditorNodeId: null,
   pendingEditorViewportRestore: null,
@@ -151,6 +164,32 @@ const state = {
   visualCenterGeneration: 0,
   appInfo: null
 };
+
+const THEME_COLOR_COLUMNS = [
+  ['#ffffff', '#f2f2f2', '#d9d9d9', '#bfbfbf', '#7f7f7f'],
+  ['#000000', '#7f7f7f', '#595959', '#3f3f3f', '#1f1f1f'],
+  ['#e7e6e6', '#d0cece', '#aeaaaa', '#757171', '#3f3f3f'],
+  ['#17365d', '#d9eaf7', '#9dc3e6', '#5b9bd5', '#1f4e79'],
+  ['#1f4e78', '#d9e2f3', '#9dc3e6', '#2e75b6', '#1f4e78'],
+  ['#ed7d31', '#fce4d6', '#f8cbad', '#c65911', '#833c0c'],
+  ['#70ad47', '#e2f0d9', '#c6e0b4', '#70ad47', '#375623'],
+  ['#00b0f0', '#d9eaf7', '#9ddcf9', '#00b0f0', '#006b8f'],
+  ['#a64ca6', '#eadcf8', '#d8b4e2', '#a64ca6', '#703070'],
+  ['#4ea72e', '#e2f0d9', '#a9d18e', '#70ad47', '#2f641c']
+];
+
+const STANDARD_COLORS = [
+  '#c00000',
+  '#ff0000',
+  '#ffc000',
+  '#ffff00',
+  '#92d050',
+  '#00b050',
+  '#00b0f0',
+  '#0070c0',
+  '#002060',
+  '#7030a0'
+];
 
 function escapeHtmlText(value) {
   return value
