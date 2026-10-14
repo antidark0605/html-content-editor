@@ -145,6 +145,24 @@
         </label>
 
         <span id="formatSelectionHint" class="format-hint">Select text in one editable block to format it.</span>
+
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button id="insertTableButton" class="table-button" title="Insert a simple table after the current text block">+ Table</button>
+
+        <div id="tableContextTools" class="table-context-tools hidden" aria-label="Table editing">
+          <span class="format-label">Row</span>
+          <button id="insertRowAboveButton" class="table-button" title="Insert row above">+↑</button>
+          <button id="insertRowBelowButton" class="table-button" title="Insert row below">+↓</button>
+          <button id="deleteRowButton" class="table-button danger-light" title="Delete selected row">Delete row</button>
+
+          <span class="format-label table-column-label">Column</span>
+          <button id="insertColumnLeftButton" class="table-button" title="Insert column to the left">+←</button>
+          <button id="insertColumnRightButton" class="table-button" title="Insert column to the right">+→</button>
+          <button id="deleteColumnButton" class="table-button danger-light" title="Delete selected column">Delete col</button>
+
+          <button id="deleteTableButton" class="table-button danger-light" title="Delete entire table">Delete table</button>
+          <span id="tableSelectionHint" class="format-hint"></span>
+        </div>
       </div>
 
       <div id="frameHost" class="frame-host">
@@ -249,6 +267,29 @@
       <button data-about-link="issues">Report Issue</button>
       <button data-about-link="license">MIT License</button>
     </div>
+  </dialog>
+
+  <dialog id="insertTableDialog" class="insert-table-dialog">
+    <form method="dialog">
+      <h2>Insert simple table</h2>
+      <p>The table is inserted after the current text block. If no text block is active, it is inserted at the end of the page body.</p>
+
+      <div class="insert-table-fields">
+        <label>
+          Rows
+          <input id="insertTableRows" type="number" min="1" max="20" value="2">
+        </label>
+        <label>
+          Columns
+          <input id="insertTableColumns" type="number" min="1" max="12" value="2">
+        </label>
+      </div>
+
+      <div class="dialog-actions">
+        <button id="cancelInsertTableButton" value="cancel">Cancel</button>
+        <button id="confirmInsertTableButton" type="button" class="primary">Insert table</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="toast" class="toast hidden" role="status"></div>

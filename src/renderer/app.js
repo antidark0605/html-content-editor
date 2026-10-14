@@ -49,6 +49,21 @@ const elements = {
   formatTextColor: document.querySelector('#formatTextColor'),
   formatBackgroundColor: document.querySelector('#formatBackgroundColor'),
   formatSelectionHint: document.querySelector('#formatSelectionHint'),
+  insertTableButton: document.querySelector('#insertTableButton'),
+  tableContextTools: document.querySelector('#tableContextTools'),
+  insertRowAboveButton: document.querySelector('#insertRowAboveButton'),
+  insertRowBelowButton: document.querySelector('#insertRowBelowButton'),
+  deleteRowButton: document.querySelector('#deleteRowButton'),
+  insertColumnLeftButton: document.querySelector('#insertColumnLeftButton'),
+  insertColumnRightButton: document.querySelector('#insertColumnRightButton'),
+  deleteColumnButton: document.querySelector('#deleteColumnButton'),
+  deleteTableButton: document.querySelector('#deleteTableButton'),
+  tableSelectionHint: document.querySelector('#tableSelectionHint'),
+  insertTableDialog: document.querySelector('#insertTableDialog'),
+  insertTableRows: document.querySelector('#insertTableRows'),
+  insertTableColumns: document.querySelector('#insertTableColumns'),
+  cancelInsertTableButton: document.querySelector('#cancelInsertTableButton'),
+  confirmInsertTableButton: document.querySelector('#confirmInsertTableButton'),
   editableCount: document.querySelector('#editableCount'),
   scriptWarning: document.querySelector('#scriptWarning'),
   frameHost: document.querySelector('#frameHost'),
@@ -103,8 +118,11 @@ const state = {
   edits: {},
   editorSource: '',
   editorTextNodes: [],
+  tables: [],
   workingSource: '',
   richSelection: null,
+  tableSelection: null,
+  lastEditorNodeId: null,
   pendingEditorViewportRestore: null,
   mode: 'edit',
   undoStack: [],
@@ -192,6 +210,20 @@ function editorStyle() {
     [data-hce-id].hce-search-hit {
       outline: 2px solid #d97706 !important;
       background: rgba(245, 158, 11, 0.24) !important;
+    }
+    td[data-hce-cell-id],
+    th[data-hce-cell-id] {
+      outline: 1px dashed rgba(31, 111, 235, 0.22) !important;
+      outline-offset: -1px !important;
+    }
+    td[data-hce-cell-id]:hover,
+    th[data-hce-cell-id]:hover {
+      outline-color: rgba(31, 111, 235, 0.55) !important;
+    }
+    td.hce-table-cell-selected,
+    th.hce-table-cell-selected {
+      outline: 2px solid #1f6feb !important;
+      outline-offset: -2px !important;
     }
   </style>`;
 }
@@ -406,7 +438,195 @@ function updateFormatControls() {
 function clearRichSelection() {
   state.richSelection = null;
   updateFormatControls();
+  updateTableControls();
 }
+
+function updateTableControls() {
+  const selection = state.tableSelection;
+  const table = selection
+    ? state.tables.find((candidate) => candidate.id === selection.tableId)
+    : null;
+
+  const active = Boolean(selection && table) &&
+    state.workspaceMode === 'editor' &&
+    state.mode === 'edit';
+
+  elements.tableContextTools.classList.toggle('hidden', !active);
+
+  if (!active) {
+    elements.tableSelectionHint.textContent = '';
+    return;
+  }
+
+  const simple = Boolean(table.simple);
+  const rowCount = table.rowCount ?? 0;
+  const columnCount = table.columnCount ?? 0;
+
+  elements.insertRowAboveButton.disabled = !simple;
+  elements.insertRowBelowButton.disabled = !simple;
+  elements.deleteRowButton.disabled = rowCount <= 1;
+  elements.insertColumnLeftButton.disabled = !simple;
+  elements.insertColumnRightButton.disabled = !simple;
+  elements.deleteColumnButton.disabled = !simple || columnCount <= 1;
+  elements.deleteTableButton.disabled = false;
+
+  elements.tableSelectionHint.textContent = simple
+    ? `Simple table · ${rowCount} × ${columnCount}`
+    : 'Complex table · row/column insertion disabled; Source view for structural work';
+}
+
+function clearTableSelection(doc = elements.pageFrame.contentDocument) {
+  state.tableSelection = null;
+
+  if (doc) {
+    for (const cell of doc.querySelectorAll('.hce-table-cell-selected')) {
+      cell.classList.remove('hce-table-cell-selected');
+    }
+  }
+
+  updateTableControls();
+}
+
+function selectTableCell(cell) {
+  const tableId = cell?.dataset?.hceTableId;
+  const rowId = cell?.dataset?.hceRowId;
+  const columnIndex = Number.parseInt(cell?.dataset?.hceColumnIndex ?? '', 10);
+
+  if (!tableId || !rowId || !Number.isInteger(columnIndex)) {
+    clearTableSelection(cell?.ownerDocument);
+    return;
+  }
+
+  const doc = cell.ownerDocument;
+  for (const selected of doc.querySelectorAll('.hce-table-cell-selected')) {
+    selected.classList.remove('hce-table-cell-selected');
+  }
+  cell.classList.add('hce-table-cell-selected');
+
+  state.tableSelection = { tableId, rowId, columnIndex };
+  updateTableControls();
+}
+
+function wireTableContext(doc) {
+  const domTables = [...doc.querySelectorAll('table')];
+
+  domTables.forEach((tableElement, tableIndex) => {
+    const table = state.tables[tableIndex];
+    if (!table) return;
+
+    tableElement.dataset.hceTableId = table.id;
+
+    const domRows = [...tableElement.rows].filter(
+      (row) => row.closest('table') === tableElement
+    );
+
+    domRows.forEach((rowElement, rowIndex) => {
+      const row = table.rows[rowIndex];
+      if (!row) return;
+
+      rowElement.dataset.hceTableId = table.id;
+      rowElement.dataset.hceRowId = row.id;
+
+      const cells = [...rowElement.cells];
+      cells.forEach((cellElement, columnIndex) => {
+        const cell = row.cells[columnIndex];
+        if (!cell) return;
+
+        cellElement.dataset.hceCellId = cell.id;
+        cellElement.dataset.hceTableId = table.id;
+        cellElement.dataset.hceRowId = row.id;
+        cellElement.dataset.hceColumnIndex = String(columnIndex);
+
+        cellElement.addEventListener('click', () => selectTableCell(cellElement));
+        cellElement.addEventListener('focusin', () => selectTableCell(cellElement));
+      });
+    });
+  });
+
+  updateTableControls();
+}
+
+function showInsertTableDialog() {
+  if (state.mode !== 'edit' || !state.session) return;
+
+  elements.insertTableRows.value = '2';
+  elements.insertTableColumns.value = '2';
+
+  if (!elements.insertTableDialog.open) {
+    elements.insertTableDialog.showModal();
+  }
+
+  window.requestAnimationFrame(() => {
+    elements.insertTableRows.focus();
+    elements.insertTableRows.select();
+  });
+}
+
+async function confirmInsertTable() {
+  const rows = Number.parseInt(elements.insertTableRows.value, 10);
+  const columns = Number.parseInt(elements.insertTableColumns.value, 10);
+
+  if (!Number.isInteger(rows) || rows < 1 || rows > 20) {
+    showToast('Rows must be between 1 and 20.');
+    return;
+  }
+
+  if (!Number.isInteger(columns) || columns < 1 || columns > 12) {
+    showToast('Columns must be between 1 and 12.');
+    return;
+  }
+
+  elements.insertTableDialog.close();
+
+  const applied = await applyTableOperation({
+    operation: 'insert-table',
+    rows,
+    columns,
+    anchorNodeId: state.lastEditorNodeId
+  });
+
+  if (applied) {
+    showToast(`Inserted ${rows} × ${columns} table.`);
+  }
+}
+
+async function applyTableOperation(request, confirmation = null) {
+  if (state.mode !== 'edit') return false;
+
+  if (confirmation && !window.confirm(confirmation)) return false;
+
+  const viewport = captureEditorViewport();
+  await flushPendingEdits();
+
+  const before = snapshotEditorState();
+  const result = await window.hce.tableOperation(request);
+
+  if (!result.ok) {
+    showToast(result.reason);
+    return false;
+  }
+
+  state.editorSource = result.editSource;
+  state.editorTextNodes = result.textNodes;
+  state.tables = result.tables ?? [];
+  state.lastEditorNodeId = null;
+  state.edits = {};
+  state.workingSource = result.workingSource;
+  setDirty(result.dirty);
+  updateEditableCount();
+  clearRichSelection();
+  clearTableSelection();
+
+  const after = snapshotEditorState();
+  state.undoStack.push({ type: 'snapshot', before, after });
+  state.redoStack.length = 0;
+  updateHistoryButtons();
+
+  state.pendingEditorViewportRestore = viewport;
+  renderEdit();
+  return true;
+}
+
 
 function captureRichSelection(doc) {
   const selection = doc.getSelection();
@@ -482,6 +702,7 @@ function snapshotEditorState() {
   return {
     editorSource: state.editorSource,
     editorTextNodes: state.editorTextNodes.map((node) => ({ ...node })),
+    tables: state.tables.map((table) => structuredClone(table)),
     edits: { ...state.edits },
     workingSource: state.workingSource
   };
@@ -490,11 +711,13 @@ function snapshotEditorState() {
 async function restoreEditorSnapshot(snapshot) {
   state.editorSource = snapshot.editorSource;
   state.editorTextNodes = snapshot.editorTextNodes.map((node) => ({ ...node }));
+  state.tables = (snapshot.tables ?? []).map((table) => structuredClone(table));
   state.edits = { ...snapshot.edits };
   state.workingSource = snapshot.workingSource;
   await rebuildWorkingSource();
   updateEditableCount();
   clearRichSelection();
+  clearTableSelection();
 }
 
 async function applyTextFormat(format, value = null) {
@@ -523,6 +746,8 @@ async function applyTextFormat(format, value = null) {
 
   state.editorSource = result.editSource;
   state.editorTextNodes = result.textNodes;
+  state.tables = result.tables ?? state.tables;
+  state.lastEditorNodeId = null;
   state.edits = {};
   state.workingSource = result.workingSource;
   setDirty(result.dirty);
@@ -558,10 +783,25 @@ function wireEditableFrame() {
   );
 
   doc.addEventListener('selectionchange', () => captureRichSelection(doc));
+  wireTableContext(doc);
 
   for (const editable of doc.querySelectorAll('[data-hce-id]')) {
     editable.addEventListener('focus', () => {
       editable.dataset.hceBefore = editable.textContent ?? '';
+      state.lastEditorNodeId = editable.dataset.hceId ?? null;
+
+      const cell = editable.closest('td, th');
+      if (cell?.dataset?.hceCellId) {
+        selectTableCell(cell);
+      }
+
+      if ((editable.textContent ?? '') === '\u00a0') {
+        const range = doc.createRange();
+        range.selectNodeContents(editable);
+        const selection = doc.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
     });
 
     editable.addEventListener('keydown', (event) => {
@@ -709,6 +949,7 @@ function renderEdit() {
 function renderPreview() {
   elements.formatToolbar.classList.add('hidden');
   clearRichSelection();
+  clearTableSelection();
   elements.diffHost.classList.add('hidden');
   elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
@@ -724,6 +965,7 @@ function renderPreview() {
 async function renderDiff() {
   elements.formatToolbar.classList.add('hidden');
   clearRichSelection();
+  clearTableSelection();
   elements.frameHost.classList.add('hidden');
   elements.diffHost.classList.remove('hidden');
   elements.editorDiffNav.classList.remove('hidden');
@@ -1906,8 +2148,11 @@ function loadSession(session) {
   state.edits = {};
   state.editorSource = session.editSource ?? session.workingSource ?? session.source;
   state.editorTextNodes = session.textNodes ?? [];
+  state.tables = session.tables ?? [];
   state.workingSource = session.workingSource ?? session.source;
   state.richSelection = null;
+  state.tableSelection = null;
+  state.lastEditorNodeId = null;
   state.pendingEditorViewportRestore = null;
   state.undoStack = [];
   state.redoStack = [];
@@ -2139,6 +2384,90 @@ elements.formatTextColor.addEventListener('change', () => {
 
 elements.formatBackgroundColor.addEventListener('change', () => {
   void applyTextFormat('backgroundColor', elements.formatBackgroundColor.value);
+});
+
+elements.insertTableButton.addEventListener('click', showInsertTableDialog);
+elements.cancelInsertTableButton.addEventListener('click', () => elements.insertTableDialog.close());
+elements.confirmInsertTableButton.addEventListener('click', () => void confirmInsertTable());
+
+elements.insertRowAboveButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-row',
+    tableId: selection.tableId,
+    rowId: selection.rowId,
+    direction: 'above'
+  });
+  if (applied) showToast('Inserted row above.');
+});
+
+elements.insertRowBelowButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-row',
+    tableId: selection.tableId,
+    rowId: selection.rowId,
+    direction: 'below'
+  });
+  if (applied) showToast('Inserted row below.');
+});
+
+elements.deleteRowButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'delete-row',
+    tableId: selection.tableId,
+    rowId: selection.rowId
+  }, 'Delete this table row?');
+  if (applied) showToast('Table row deleted.');
+});
+
+elements.insertColumnLeftButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-column',
+    tableId: selection.tableId,
+    columnIndex: selection.columnIndex,
+    direction: 'left'
+  });
+  if (applied) showToast('Inserted column to the left.');
+});
+
+elements.insertColumnRightButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-column',
+    tableId: selection.tableId,
+    columnIndex: selection.columnIndex,
+    direction: 'right'
+  });
+  if (applied) showToast('Inserted column to the right.');
+});
+
+elements.deleteColumnButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'delete-column',
+    tableId: selection.tableId,
+    columnIndex: selection.columnIndex
+  }, 'Delete this entire table column?');
+  if (applied) showToast('Table column deleted.');
+});
+
+elements.deleteTableButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'delete-table',
+    tableId: selection.tableId
+  }, 'Delete this entire table?');
+  if (applied) showToast('Table deleted.');
 });
 
 for (const button of elements.modeButtons) {
