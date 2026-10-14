@@ -132,13 +132,13 @@ try {
   const page = await electronApp.firstWindow();
 
   await page.waitForFunction(() =>
-    document.querySelector('#appVersion')?.textContent === 'v0.7.0'
+    document.querySelector('#appVersion')?.textContent === 'v0.8.0'
   );
-  assert.equal(await page.locator('#appVersion').textContent(), 'v0.7.0');
+  assert.equal(await page.locator('#appVersion').textContent(), 'v0.8.0');
 
   await page.locator('#aboutButton').click();
   await page.waitForSelector('#aboutDialog[open]');
-  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.7.0');
+  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.8.0');
   assert.match(await page.locator('#aboutBuild').textContent() ?? '', /^Build (development|[0-9a-f]{8})$/);
   assert.ok((await page.locator('#aboutElectron').textContent())?.length > 0);
   assert.ok((await page.locator('#aboutPlatform').textContent())?.includes('win32'));
@@ -528,6 +528,65 @@ try {
     path: path.join(outputDir, 'editor-formatting.png'),
     fullPage: true
   });
+
+  // Basic table editing: create a simple table, edit rows/columns, delete it, then undo.
+  await editorFrame.locator('[data-hce-id]:has-text("Notes")').first().click();
+  await page.locator('#insertTableButton').click();
+  await page.waitForSelector('#insertTableDialog[open]');
+  await page.locator('#insertTableRows').fill('2');
+  await page.locator('#insertTableColumns').fill('3');
+  await page.locator('#confirmInsertTableButton').click();
+
+  await editorFrame.waitForSelector('table');
+  assert.equal(await editorFrame.locator('table').count(), 1);
+  assert.equal(await editorFrame.locator('table tr').count(), 2);
+  assert.equal(await editorFrame.locator('table tr').first().locator('td, th').count(), 3);
+
+  await editorFrame.locator('table tr').first().locator('td, th').first().click();
+  await page.waitForSelector('#tableContextTools:not(.hidden)');
+  assert.match(await page.locator('#tableSelectionHint').textContent() ?? '', /2 × 3/);
+
+  await page.locator('#insertRowBelowButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#pageFrame')?.contentDocument?.querySelectorAll('table tr').length === 3
+  );
+
+  await editorFrame.locator('table tr').first().locator('td, th').first().click();
+  await page.locator('#insertColumnRightButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#pageFrame')?.contentDocument?.querySelector('table tr')?.cells?.length === 4
+  );
+
+  await editorFrame.locator('table tr').nth(1).locator('td, th').first().click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.locator('#deleteRowButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#pageFrame')?.contentDocument?.querySelectorAll('table tr').length === 2
+  );
+
+  await editorFrame.locator('table tr').first().locator('td, th').nth(1).click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.locator('#deleteColumnButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#pageFrame')?.contentDocument?.querySelector('table tr')?.cells?.length === 3
+  );
+
+  await page.screenshot({
+    path: path.join(outputDir, 'editor-table.png'),
+    fullPage: true
+  });
+
+  await editorFrame.locator('table tr').first().locator('td, th').first().click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.locator('#deleteTableButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#pageFrame')?.contentDocument?.querySelectorAll('table').length === 0
+  );
+
+  await page.locator('#undoButton').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#pageFrame')?.contentDocument?.querySelectorAll('table').length === 1
+  );
 
   await editTextNode(
     editorFrame,
