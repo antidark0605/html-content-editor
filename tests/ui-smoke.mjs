@@ -559,7 +559,7 @@ try {
   await page.locator('#colorPalette .color-swatch[data-color="#0070c0"]').click();
 
   await page.locator('#backgroundColorButton').click();
-  await page.locator('#colorPalette .color-swatch[data-color="#d9eaf7"]').click();
+  await page.locator('#colorPalette .color-swatch[data-color="#d9eaf7"]').first().click();
 
   await page.keyboard.type(' COLORED');
   await page.locator('#fileName').click();
