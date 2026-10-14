@@ -113,6 +113,42 @@ test('source comparison creates aligned rows and can merge structural changes', 
   assert.ok(after.hunks.length < comparison.hunks.length || merged.rightSource.includes('Alpha'));
 });
 
+test('table row insertion stays structural in Visual Compare and mergeable in Source Compare', () => {
+  const left = [
+    '<table>',
+    '  <tr><td>Alice</td><td>90</td></tr>',
+    '  <tr><td>Bob</td><td>85</td></tr>',
+    '</table>',
+    ''
+  ].join('\n');
+
+  const right = [
+    '<table>',
+    '  <tr><td>Alice</td><td>90</td></tr>',
+    '  <tr><td>David</td><td>88</td></tr>',
+    '  <tr><td>Bob</td><td>85</td></tr>',
+    '</table>',
+    ''
+  ].join('\n');
+
+  const visual = buildVisibleComparison(left, right);
+  const insertedRowHunk = visual.hunks.find((hunk) =>
+    hunk.rightPreview.includes('David') || hunk.rightPreview.includes('88')
+  );
+
+  assert.ok(insertedRowHunk);
+  assert.equal(insertedRowHunk.mergeableText, false);
+
+  const source = buildSourceComparison(left, right);
+  const addedRowHunk = source.hunks.find((hunk) => hunk.rightCount > hunk.leftCount);
+  assert.ok(addedRowHunk);
+
+  const merged = mergeSourceHunk(left, right, addedRowHunk.id, 'right-to-left');
+  assert.equal(merged.ok, true);
+  assert.match(merged.leftSource, /David/);
+  assert.match(merged.leftSource, /88/);
+});
+
 test('content-aligned scrolling interpolates between matched anchors', () => {
   const points = [
     { left: 0, right: 0 },
