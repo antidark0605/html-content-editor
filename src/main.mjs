@@ -16,6 +16,16 @@ import {
   mergeSourceHunk,
   mergeVisibleTextHunk
 } from './compare-model.mjs';
+import {
+  defaultTableInsertionOffset,
+  deleteTable,
+  deleteTableColumn,
+  deleteTableRow,
+  extractTables,
+  insertSimpleTable,
+  insertTableColumn,
+  insertTableRow
+} from './table-model.mjs';
 import { firstUsableDirectory } from './open-path.mjs';
 import { BUILD_COMMIT } from './build-info.mjs';
 
@@ -149,6 +159,7 @@ function sessionPayload() {
     editSource: session.working,
     workingSource: session.working,
     textNodes: extractEditableTextNodes(session.working),
+    tables: extractTables(session.working),
     baseHref: baseHrefFor(session.filePath),
     dirty: session.dirty,
     hasScripts: /<script\b/i.test(session.original)
@@ -717,6 +728,95 @@ ipcMain.handle('html:format-selection', async (_event, request) => {
       workingSource: formatted,
       editSource: formatted,
       textNodes: extractEditableTextNodes(formatted),
+      tables: extractTables(formatted),
+      dirty: session.dirty
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
+});
+
+ipcMain.handle('html:table-operation', async (_event, request = {}) => {
+  if (!session) {
+    return { ok: false, reason: 'No HTML file is open.' };
+  }
+
+  try {
+    const source = session.working;
+    let nextSource = source;
+
+    switch (request.operation) {
+      case 'insert-table': {
+        const textNodes = extractEditableTextNodes(source);
+        const anchorNode = typeof request.anchorNodeId === 'string'
+          ? textNodes.find((node) => node.id === request.anchorNodeId)
+          : null;
+        const offset = Number.isInteger(anchorNode?.insertAfter)
+          ? anchorNode.insertAfter
+          : defaultTableInsertionOffset(source);
+        nextSource = insertSimpleTable(
+          source,
+          request.rows,
+          request.columns,
+          offset
+        );
+        break;
+      }
+
+      case 'insert-row':
+        nextSource = insertTableRow(
+          source,
+          request.tableId,
+          request.rowId,
+          request.direction
+        );
+        break;
+
+      case 'delete-row':
+        nextSource = deleteTableRow(
+          source,
+          request.tableId,
+          request.rowId
+        );
+        break;
+
+      case 'insert-column':
+        nextSource = insertTableColumn(
+          source,
+          request.tableId,
+          request.columnIndex,
+          request.direction
+        );
+        break;
+
+      case 'delete-column':
+        nextSource = deleteTableColumn(
+          source,
+          request.tableId,
+          request.columnIndex
+        );
+        break;
+
+      case 'delete-table':
+        nextSource = deleteTable(source, request.tableId);
+        break;
+
+      default:
+        throw new Error('Unknown table operation.');
+    }
+
+    session.working = nextSource;
+    session.dirty = nextSource !== session.original;
+
+    return {
+      ok: true,
+      workingSource: nextSource,
+      editSource: nextSource,
+      textNodes: extractEditableTextNodes(nextSource),
+      tables: extractTables(nextSource),
       dirty: session.dirty
     };
   } catch (error) {
