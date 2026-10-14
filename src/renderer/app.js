@@ -578,20 +578,22 @@ async function confirmInsertTable() {
 
   elements.insertTableDialog.close();
 
-  await applyTableOperation({
+  const applied = await applyTableOperation({
     operation: 'insert-table',
     rows,
     columns,
     anchorNodeId: state.lastEditorNodeId
   });
 
-  showToast(`Inserted ${rows} × ${columns} table.`);
+  if (applied) {
+    showToast(`Inserted ${rows} × ${columns} table.`);
+  }
 }
 
 async function applyTableOperation(request, confirmation = null) {
-  if (state.mode !== 'edit') return;
+  if (state.mode !== 'edit') return false;
 
-  if (confirmation && !window.confirm(confirmation)) return;
+  if (confirmation && !window.confirm(confirmation)) return false;
 
   const viewport = captureEditorViewport();
   await flushPendingEdits();
@@ -601,7 +603,7 @@ async function applyTableOperation(request, confirmation = null) {
 
   if (!result.ok) {
     showToast(result.reason);
-    return;
+    return false;
   }
 
   state.editorSource = result.editSource;
@@ -621,6 +623,7 @@ async function applyTableOperation(request, confirmation = null) {
 
   state.pendingEditorViewportRestore = viewport;
   renderEdit();
+  return true;
 }
 
 
@@ -2369,6 +2372,90 @@ elements.formatTextColor.addEventListener('change', () => {
 
 elements.formatBackgroundColor.addEventListener('change', () => {
   void applyTextFormat('backgroundColor', elements.formatBackgroundColor.value);
+});
+
+elements.insertTableButton.addEventListener('click', showInsertTableDialog);
+elements.cancelInsertTableButton.addEventListener('click', () => elements.insertTableDialog.close());
+elements.confirmInsertTableButton.addEventListener('click', () => void confirmInsertTable());
+
+elements.insertRowAboveButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-row',
+    tableId: selection.tableId,
+    rowId: selection.rowId,
+    direction: 'above'
+  });
+  if (applied) showToast('Inserted row above.');
+});
+
+elements.insertRowBelowButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-row',
+    tableId: selection.tableId,
+    rowId: selection.rowId,
+    direction: 'below'
+  });
+  if (applied) showToast('Inserted row below.');
+});
+
+elements.deleteRowButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'delete-row',
+    tableId: selection.tableId,
+    rowId: selection.rowId
+  }, 'Delete this table row?');
+  if (applied) showToast('Table row deleted.');
+});
+
+elements.insertColumnLeftButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-column',
+    tableId: selection.tableId,
+    columnIndex: selection.columnIndex,
+    direction: 'left'
+  });
+  if (applied) showToast('Inserted column to the left.');
+});
+
+elements.insertColumnRightButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'insert-column',
+    tableId: selection.tableId,
+    columnIndex: selection.columnIndex,
+    direction: 'right'
+  });
+  if (applied) showToast('Inserted column to the right.');
+});
+
+elements.deleteColumnButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'delete-column',
+    tableId: selection.tableId,
+    columnIndex: selection.columnIndex
+  }, 'Delete this entire table column?');
+  if (applied) showToast('Table column deleted.');
+});
+
+elements.deleteTableButton.addEventListener('click', async () => {
+  const selection = state.tableSelection;
+  if (!selection) return;
+  const applied = await applyTableOperation({
+    operation: 'delete-table',
+    tableId: selection.tableId
+  }, 'Delete this entire table?');
+  if (applied) showToast('Table deleted.');
 });
 
 for (const button of elements.modeButtons) {
