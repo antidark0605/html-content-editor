@@ -533,6 +533,15 @@ try {
   );
   await page.locator('#textColorButton').click();
   await page.waitForSelector('#colorPalette:not(.hidden)');
+  assert.equal(await page.locator('#themeColorGrid .color-swatch').count(), 50);
+  assert.equal(await page.locator('#standardColorGrid .color-swatch').count(), 10);
+  assert.equal(await page.locator('#otherColorsButton').isVisible(), true);
+
+  await page.screenshot({
+    path: path.join(outputDir, 'editor-color-palette.png'),
+    fullPage: true
+  });
+
   await page.locator('#colorPalette .color-swatch[data-color="#c00000"]').click();
   await editorFrame.waitForSelector('span[style*="color: #c00000"]');
 
