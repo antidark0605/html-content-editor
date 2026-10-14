@@ -698,6 +698,12 @@ try {
     fullPage: true
   });
 } finally {
-  await electronApp.close();
+  // Force-exit in test teardown so a failed assertion cannot hang CI behind
+  // the native unsaved-changes dialog.
+  try {
+    await electronApp.evaluate(({ app }) => app.exit(0));
+  } catch {
+    // The evaluation can race with process shutdown; either way the app is exiting.
+  }
   await fs.rm(tempDir, { recursive: true, force: true });
 }
