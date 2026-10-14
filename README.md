@@ -144,7 +144,7 @@ Real Electron UI validation:
 npm run test:ui
 ```
 
-The Windows CI runs unit tests and the Electron UI validation **before** packaging binaries. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, edits visible text, validates Edit/Preview behavior and Editor diff navigation/rail markers. CI also keeps validation screenshots as an artifact.
+The Windows CI runs unit tests and Electron UI validation on pull requests. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, verifies that deep-document edits preserve the current Compare viewport, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, edits visible text, and validates Edit/Preview behavior plus Editor diff navigation/rail markers. UI validation screenshots are retained for 7 days.
 
 ## Build for Windows
 
@@ -152,12 +152,12 @@ The Windows CI runs unit tests and the Electron UI validation **before** packagi
 npm run build:win
 ```
 
-GitHub Actions also builds both Windows targets automatically:
+After changes reach `main`, GitHub Actions builds both Windows targets automatically:
 
 - `HTML-Content-Editor-Setup-<version>-x64.exe`
 - `HTML-Content-Editor-Portable-<version>-x64.exe`
 
-Download them from the **Windows Build** workflow artifact named `HTML-Content-Editor-Windows`.
+Pull requests run tests without producing another full Windows binary artifact. The `main` artifact is named `HTML-Content-Editor-Windows` and is retained for 90 days while the project is still pre-release.
 
 ## License
 

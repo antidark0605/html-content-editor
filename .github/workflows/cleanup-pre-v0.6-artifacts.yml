@@ -1,0 +1,49 @@
+name: Cleanup pre-v0.6 Windows artifacts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/cleanup-pre-v0.6-artifacts.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Windows artifacts older than v0.6.0
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cutoff = new Date('2026-10-11T11:58:56Z');
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              }
+            );
+
+            const targets = artifacts.filter((artifact) =>
+              artifact.name === 'HTML-Content-Editor-Windows' &&
+              new Date(artifact.created_at) < cutoff
+            );
+
+            core.info(`Deleting ${targets.length} pre-v0.6 Windows artifact(s).`);
+
+            for (const artifact of targets) {
+              core.info(
+                `Deleting artifact ${artifact.id} created ${artifact.created_at}`
+              );
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id
+              });
+            }

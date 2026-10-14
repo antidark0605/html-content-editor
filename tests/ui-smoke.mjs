@@ -113,13 +113,13 @@ try {
   const page = await electronApp.firstWindow();
 
   await page.waitForFunction(() =>
-    document.querySelector('#appVersion')?.textContent === 'v0.6.1'
+    document.querySelector('#appVersion')?.textContent === 'v0.6.2'
   );
-  assert.equal(await page.locator('#appVersion').textContent(), 'v0.6.1');
+  assert.equal(await page.locator('#appVersion').textContent(), 'v0.6.2');
 
   await page.locator('#aboutButton').click();
   await page.waitForSelector('#aboutDialog[open]');
-  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.6.1');
+  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.6.2');
   assert.match(await page.locator('#aboutBuild').textContent() ?? '', /^Build (development|[0-9a-f]{8})$/);
   assert.ok((await page.locator('#aboutElectron').textContent())?.length > 0);
   assert.ok((await page.locator('#aboutPlatform').textContent())?.includes('win32'));
@@ -247,15 +247,58 @@ try {
   );
 
   // Both Visual Compare panes are directly editable and participate in one history.
+  // Editing deep in the document must preserve the current viewport instead of jumping to the top.
+  const deepLeftSelector = '[data-hce-compare-id]:has-text("This final section is the same on both pages.")';
+  const deepLeftTarget = leftFrame.locator(deepLeftSelector).first();
+  await deepLeftTarget.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(350);
+
+  const beforeDeepEditScroll = await Promise.all([
+    leftFrame.evaluate(() => document.scrollingElement.scrollTop),
+    rightFrame.evaluate(() => document.scrollingElement.scrollTop)
+  ]);
+  assert.ok(beforeDeepEditScroll[0] > 500, `Expected deep left scroll before edit, got ${beforeDeepEditScroll[0]}`);
+
   await editTextNode(
     leftFrame,
-    '[data-hce-compare-id]:has-text("This introduction is the same on both pages.")',
-    'Left introduction edited in Visual Compare.'
+    deepLeftSelector,
+    'Left final section edited in Visual Compare.'
   );
 
   await page.waitForFunction(() =>
     !document.querySelector('#compareLeftDirty')?.classList.contains('hidden') &&
     /Undo \(1\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? '')
+  );
+
+  await page.waitForTimeout(350);
+
+  const afterDeepEditScroll = await Promise.all([
+    leftFrame.evaluate(() => document.scrollingElement.scrollTop),
+    rightFrame.evaluate(() => document.scrollingElement.scrollTop)
+  ]);
+
+  assert.ok(
+    Math.abs(afterDeepEditScroll[0] - beforeDeepEditScroll[0]) < 120,
+    `Left Compare viewport jumped after edit: ${beforeDeepEditScroll[0]} -> ${afterDeepEditScroll[0]}`
+  );
+  assert.ok(
+    afterDeepEditScroll[0] > 500,
+    `Left Compare unexpectedly returned near the top after edit: ${afterDeepEditScroll[0]}`
+  );
+
+  const editedLeftPlacement = await leftFrame.locator(
+    '[data-hce-compare-id]:has-text("Left final section edited in Visual Compare.")'
+  ).first().evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      top: rect.top,
+      bottom: rect.bottom,
+      viewportHeight: document.documentElement.clientHeight
+    };
+  });
+  assert.ok(
+    editedLeftPlacement.bottom >= 0 && editedLeftPlacement.top <= editedLeftPlacement.viewportHeight,
+    `Edited Compare text is no longer visible after rerender: ${JSON.stringify(editedLeftPlacement)}`
   );
 
   await editTextNode(
@@ -280,7 +323,7 @@ try {
   await page.locator('#compareRedoButton').click();
   await page.waitForFunction(() => /Undo \(2\)/.test(document.querySelector('#compareUndoButton')?.textContent ?? ''));
 
-  assert.ok(await leftFrame.locator('text=Left introduction edited in Visual Compare.').count() > 0);
+  assert.ok(await leftFrame.locator('text=Left final section edited in Visual Compare.').count() > 0);
   assert.ok(await rightFrame.locator('text=Right final section edited in Visual Compare.').count() > 0);
 
   await page.locator('#saveCompareLeftButton').click();
