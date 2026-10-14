@@ -131,6 +131,8 @@ const state = {
   workingSource: '',
   richSelection: null,
   editorCaret: null,
+  caretTypingStyle: null,
+  compositionState: null,
   colorPaletteTarget: null,
   currentTextColor: '#d32f2f',
   currentBackgroundColor: '#fff2a8',
