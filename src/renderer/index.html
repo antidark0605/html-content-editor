@@ -134,15 +134,41 @@
           <option value="32px">32</option>
         </select>
 
-        <label class="format-color-control" title="Text color">
-          <span>A</span>
-          <input id="formatTextColor" type="color" value="#d32f2f" aria-label="Text color">
-        </label>
+        <div class="color-tool">
+          <button id="textColorButton" class="format-color-button" title="Text color" aria-haspopup="dialog" aria-expanded="false" disabled>
+            <span class="color-button-letter">A</span>
+            <span id="textColorPreview" class="color-button-preview" style="--preview-color:#d32f2f"></span>
+            <span class="color-button-chevron">▾</span>
+          </button>
+        </div>
 
-        <label class="format-color-control highlight-control" title="Text background color">
-          <span>A</span>
-          <input id="formatBackgroundColor" type="color" value="#fff2a8" aria-label="Text background color">
-        </label>
+        <div class="color-tool">
+          <button id="backgroundColorButton" class="format-color-button highlight-button" title="Text background color" aria-haspopup="dialog" aria-expanded="false" disabled>
+            <span class="color-button-letter">A</span>
+            <span id="backgroundColorPreview" class="color-button-preview" style="--preview-color:#fff2a8"></span>
+            <span class="color-button-chevron">▾</span>
+          </button>
+        </div>
+
+        <div id="colorPalette" class="color-palette hidden" role="dialog" aria-label="Color palette">
+          <div class="color-palette-header">
+            <strong id="colorPaletteTitle">Text color</strong>
+            <span id="colorPaletteModeHint">Apply to selected text</span>
+          </div>
+
+          <div class="color-palette-section">
+            <span class="color-palette-label">Theme colors</span>
+            <div id="themeColorGrid" class="color-grid theme-color-grid"></div>
+          </div>
+
+          <div class="color-palette-section">
+            <span class="color-palette-label">Standard colors</span>
+            <div id="standardColorGrid" class="color-grid standard-color-grid"></div>
+          </div>
+
+          <button id="otherColorsButton" class="other-colors-button" type="button">🎨 Other colors…</button>
+          <input id="otherColorsInput" class="visually-hidden-color-input" type="color" value="#d32f2f" tabindex="-1" aria-hidden="true">
+        </div>
 
         <span id="formatSelectionHint" class="format-hint">Select text in one editable block to format it.</span>
 
