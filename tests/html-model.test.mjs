@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyInlineFormatting,
+  applyStyledTextSegments,
   applyTextEdits,
   buildEditableHtml,
   extractEditableTextNodes
@@ -93,6 +94,56 @@ test('supports controlled size and color formatting', () => {
 
   assert.match(sized, /font-size: 20px/);
   assert.match(colored, /color: #d32f2f/);
+});
+
+test('commits caret-typed text color as controlled source markup', () => {
+  const source = '<p>Hello world</p>';
+  const node = extractEditableTextNodes(source)[0];
+
+  const updated = applyStyledTextSegments(source, {
+    nodeId: node.id,
+    segments: [
+      { text: 'Hello ' },
+      { text: 'red', style: { color: '#C00000' } },
+      { text: ' world' }
+    ]
+  });
+
+  assert.equal(
+    updated,
+    '<p>Hello <span style="color: #c00000;">red</span> world</p>'
+  );
+});
+
+test('supports combined caret text and background colors without accepting arbitrary styles', () => {
+  const source = '<p>Alpha</p>';
+  const node = extractEditableTextNodes(source)[0];
+
+  const updated = applyStyledTextSegments(source, {
+    nodeId: node.id,
+    segments: [
+      {
+        text: 'Alpha',
+        style: {
+          color: '#0070C0',
+          backgroundColor: '#FFF2A8'
+        }
+      }
+    ]
+  });
+
+  assert.equal(
+    updated,
+    '<p><span style="color: #0070c0; background-color: #fff2a8;">Alpha</span></p>'
+  );
+
+  assert.throws(
+    () => applyStyledTextSegments(source, {
+      nodeId: node.id,
+      segments: [{ text: 'Alpha', style: { color: 'expression(bad)' } }]
+    }),
+    /Invalid text color/
+  );
 });
 
 test('rejects cross-node or stale formatting requests instead of guessing', () => {
