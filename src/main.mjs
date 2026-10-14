@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { diffLines } from 'diff';
 import {
   applyInlineFormatting,
+  applyStyledTextSegments,
   applyTextEdits,
   extractEditableTextNodes
 } from './html-model.mjs';
@@ -711,6 +712,32 @@ ipcMain.handle('html:apply-edits', async (_event, baseSource, edits) => {
     workingSource: working,
     dirty: session.dirty
   };
+});
+
+ipcMain.handle('html:commit-styled-text', async (_event, request) => {
+  if (!session) {
+    return { ok: false, reason: 'No HTML file is open.' };
+  }
+
+  try {
+    const updated = applyStyledTextSegments(session.working, request ?? {});
+    session.working = updated;
+    session.dirty = updated !== session.original;
+
+    return {
+      ok: true,
+      workingSource: updated,
+      editSource: updated,
+      textNodes: extractEditableTextNodes(updated),
+      tables: extractTables(updated),
+      dirty: session.dirty
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
 });
 
 ipcMain.handle('html:format-selection', async (_event, request) => {
