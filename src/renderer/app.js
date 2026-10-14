@@ -1040,49 +1040,30 @@ function activateCaretColor(target, color) {
 
   if (!doc || !editable) return false;
 
-  let range = currentCaretRange(
+  const range = currentCaretRange(
     doc,
     editable,
     state.editorCaret.offset
   );
 
-  let typingSpan = transientTypingSpanForRange(range);
-
-  if (typingSpan && (typingSpan.textContent ?? '').length > 0) {
-    const atEnd = range.collapsed &&
-      textOffsetWithin(
-        doc,
-        typingSpan,
-        range.startContainer,
-        range.startOffset
-      ) === (typingSpan.textContent ?? '').length;
-
-    if (atEnd) {
-      const after = doc.createRange();
-      after.setStartAfter(typingSpan);
-      after.collapse(true);
-      range = after;
-      typingSpan = null;
-    }
-  }
-
-  if (!typingSpan) {
-    typingSpan = doc.createElement('span');
-    typingSpan.dataset.hceTypingStyle = 'true';
-    range.insertNode(typingSpan);
-  }
+  const style = state.caretTypingStyle?.nodeId === editable.dataset.hceId
+    ? { ...state.caretTypingStyle }
+    : { nodeId: editable.dataset.hceId };
 
   if (target === 'background') {
-    typingSpan.dataset.hceBackgroundColor = color;
-    typingSpan.style.backgroundColor = color;
+    style.backgroundColor = color;
   } else {
-    typingSpan.dataset.hceColor = color;
-    typingSpan.style.color = color;
+    style.color = color;
   }
+
+  state.caretTypingStyle = style;
 
   elements.pageFrame.contentWindow?.focus();
   editable.focus({ preventScroll: true });
-  setCaretInsideTypingSpan(doc, typingSpan);
+
+  const selection = doc.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
 
   state.richSelection = null;
   state.editorCaret = {
@@ -1090,14 +1071,13 @@ function activateCaretColor(target, color) {
     offset: textOffsetWithin(
       doc,
       editable,
-      doc.getSelection().getRangeAt(0).startContainer,
-      doc.getSelection().getRangeAt(0).startOffset
+      range.startContainer,
+      range.startOffset
     )
   };
   updateFormatControls();
   return true;
 }
-
 async function applyPaletteColor(color) {
   const target = state.colorPaletteTarget;
   if (!target) return;
