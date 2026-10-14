@@ -531,8 +531,8 @@ try {
 
   await editTextNode(
     editorFrame,
-    '[data-hce-id]:has-text("HTML Compare Demo")',
-    'HTML Compare Demo Edited'
+    '[data-hce-id]:has-text("This introduction is the same on both pages.")',
+    'This introduction was edited after formatting.'
   );
   await editTextNode(
     editorFrame,
@@ -549,7 +549,7 @@ try {
     document.querySelector('#editorModeHint')?.textContent === 'Final render · read-only'
   );
   assert.equal(await editorFrame.locator('[data-hce-id]').count(), 0);
-  assert.ok(await editorFrame.locator('text=HTML Compare Demo Edited').count() > 0);
+  assert.ok(await editorFrame.locator('text=This introduction was edited after formatting.').count() > 0);
 
   await page.locator('[data-mode="edit"]').click();
   await page.waitForFunction(() =>
