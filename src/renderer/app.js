@@ -435,32 +435,41 @@ function styledSegmentsFromEditable(editable) {
     segments.push({ text, ...(style ? { style } : {}) });
   };
 
-  for (const child of editable.childNodes) {
-    if (child.nodeType === Node.TEXT_NODE) {
-      pushSegment(child.nodeValue ?? '');
-      continue;
+  const visit = (node, inheritedStyle = null) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      pushSegment(node.nodeValue ?? '', inheritedStyle);
+      return;
     }
 
-    if (
-      child.nodeType === Node.ELEMENT_NODE &&
-      child.matches?.('[data-hce-typing-style]')
-    ) {
-      const style = {};
-      if (child.dataset.hceColor) style.color = child.dataset.hceColor;
-      if (child.dataset.hceBackgroundColor) {
-        style.backgroundColor = child.dataset.hceBackgroundColor;
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    let style = inheritedStyle ? { ...inheritedStyle } : null;
+
+    if (node.matches?.('[data-hce-typing-style]')) {
+      style = style ?? {};
+
+      if (node.dataset.hceColor) {
+        style.color = node.dataset.hceColor;
       }
 
-      pushSegment(child.textContent ?? '', Object.keys(style).length > 0 ? style : null);
-      continue;
+      if (node.dataset.hceBackgroundColor) {
+        style.backgroundColor = node.dataset.hceBackgroundColor;
+      }
     }
 
-    pushSegment(child.textContent ?? '');
+    const normalizedStyle = style && Object.keys(style).length > 0 ? style : null;
+
+    for (const child of node.childNodes) {
+      visit(child, normalizedStyle);
+    }
+  };
+
+  for (const child of editable.childNodes) {
+    visit(child);
   }
 
   return segments;
 }
-
 function hasCommittedTypingStyle(editable) {
   return [...editable.querySelectorAll('[data-hce-typing-style]')]
     .some((node) => (node.textContent ?? '').length > 0);
