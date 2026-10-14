@@ -1039,6 +1039,119 @@ function setCaretInsideTypingSpan(doc, span) {
   selection.addRange(range);
 }
 
+function typingStyleForEditable(editable) {
+  const style = state.caretTypingStyle;
+  if (!style || style.nodeId !== editable?.dataset?.hceId) return null;
+
+  const normalized = {};
+  if (style.color) normalized.color = style.color;
+  if (style.backgroundColor) normalized.backgroundColor = style.backgroundColor;
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function applyTypingStyleToSpan(span, style) {
+  span.dataset.hceTypingStyle = 'true';
+
+  if (style.color) {
+    span.dataset.hceColor = style.color;
+    span.style.color = style.color;
+  }
+
+  if (style.backgroundColor) {
+    span.dataset.hceBackgroundColor = style.backgroundColor;
+    span.style.backgroundColor = style.backgroundColor;
+  }
+}
+
+function typingSpanMatchesStyle(span, style) {
+  if (!span || !style) return false;
+
+  return (
+    (span.dataset.hceColor ?? null) === (style.color ?? null) &&
+    (span.dataset.hceBackgroundColor ?? null) === (style.backgroundColor ?? null)
+  );
+}
+
+function updateCaretStateFromSelection(doc, editable) {
+  const selection = doc.getSelection();
+  if (!selection?.rangeCount) return;
+
+  const range = selection.getRangeAt(0);
+  if (!selection.isCollapsed || editableForRangeNode(range.startContainer) !== editable) return;
+
+  state.editorCaret = {
+    nodeId: editable.dataset.hceId,
+    offset: textOffsetWithin(
+      doc,
+      editable,
+      range.startContainer,
+      range.startOffset
+    )
+  };
+}
+
+function insertStyledTextAtSelection(doc, editable, text) {
+  const style = typingStyleForEditable(editable);
+  if (!style || typeof text !== 'string' || text.length === 0) return false;
+
+  const selection = doc.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return false;
+
+  let range = selection.getRangeAt(0);
+  if (editableForRangeNode(range.startContainer) !== editable) return false;
+
+  let typingSpan = transientTypingSpanForRange(range);
+
+  if (!typingSpan || !typingSpanMatchesStyle(typingSpan, style)) {
+    typingSpan = doc.createElement('span');
+    applyTypingStyleToSpan(typingSpan, style);
+    range.insertNode(typingSpan);
+
+    range = doc.createRange();
+    range.selectNodeContents(typingSpan);
+    range.collapse(false);
+  }
+
+  const textNode = doc.createTextNode(text);
+  range.insertNode(textNode);
+
+  const nextRange = doc.createRange();
+  nextRange.setStartAfter(textNode);
+  nextRange.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+
+  updateCaretStateFromSelection(doc, editable);
+  return true;
+}
+
+function textBoundaryAtOffset(doc, editable, offset) {
+  const point = caretPointAtTextOffset(doc, editable, offset);
+  return point;
+}
+
+function wrapTextOffsetsWithTypingStyle(doc, editable, start, end, style) {
+  if (!style || end <= start) return false;
+
+  const startPoint = textBoundaryAtOffset(doc, editable, start);
+  const endPoint = textBoundaryAtOffset(doc, editable, end);
+  const range = doc.createRange();
+  range.setStart(startPoint.node, startPoint.offset);
+  range.setEnd(endPoint.node, endPoint.offset);
+
+  const contents = range.extractContents();
+  const span = doc.createElement('span');
+  applyTypingStyleToSpan(span, style);
+  span.append(contents);
+  range.insertNode(span);
+
+  setCaretInsideTypingSpan(doc, span);
+  updateCaretStateFromSelection(doc, editable);
+  return true;
+}
+
+
 function activateCaretColor(target, color) {
   if (!state.editorCaret || state.mode !== 'edit') return false;
 
