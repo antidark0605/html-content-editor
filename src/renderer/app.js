@@ -1358,6 +1358,8 @@ function wireEditableFrame() {
     editable.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         editable.textContent = editable.dataset.hceBefore ?? editable.textContent;
+        state.caretTypingStyle = null;
+        state.compositionState = null;
         editable.blur();
       }
 
@@ -1367,8 +1369,109 @@ function wireEditableFrame() {
       }
     });
 
+    editable.addEventListener('beforeinput', (event) => {
+      if (
+        event.inputType !== 'insertText' ||
+        event.isComposing ||
+        typeof event.data !== 'string' ||
+        !typingStyleForEditable(editable)
+      ) {
+        return;
+      }
+
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+
+      if (
+        !selection?.isCollapsed ||
+        !range ||
+        editableForRangeNode(range.startContainer) !== editable
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      insertStyledTextAtSelection(doc, editable, event.data);
+    });
+
+    editable.addEventListener('paste', (event) => {
+      if (!typingStyleForEditable(editable)) return;
+
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+
+      if (
+        !text ||
+        !selection?.isCollapsed ||
+        !range ||
+        editableForRangeNode(range.startContainer) !== editable
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      insertStyledTextAtSelection(doc, editable, text);
+    });
+
+    editable.addEventListener('compositionstart', () => {
+      const style = typingStyleForEditable(editable);
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+
+      if (
+        !style ||
+        !selection?.isCollapsed ||
+        !range ||
+        editableForRangeNode(range.startContainer) !== editable
+      ) {
+        state.compositionState = null;
+        return;
+      }
+
+      state.compositionState = {
+        nodeId: editable.dataset.hceId,
+        start: textOffsetWithin(
+          doc,
+          editable,
+          range.startContainer,
+          range.startOffset
+        ),
+        style: { ...style }
+      };
+    });
+
+    editable.addEventListener('compositionend', (event) => {
+      const composition = state.compositionState;
+      state.compositionState = null;
+
+      if (
+        !composition ||
+        composition.nodeId !== editable.dataset.hceId ||
+        typeof event.data !== 'string' ||
+        event.data.length === 0
+      ) {
+        return;
+      }
+
+      wrapTextOffsetsWithTypingStyle(
+        doc,
+        editable,
+        composition.start,
+        composition.start + event.data.length,
+        composition.style
+      );
+    });
+
     editable.addEventListener('blur', () => {
-      void queueEditableCommit(editable);
+      void queueEditableCommit(editable).finally(() => {
+        if (state.caretTypingStyle?.nodeId === editable.dataset.hceId) {
+          state.caretTypingStyle = null;
+          state.editorCaret = null;
+          state.compositionState = null;
+          updateFormatControls();
+        }
+      });
     });
   }
 
