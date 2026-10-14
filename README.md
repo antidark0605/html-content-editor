@@ -13,7 +13,8 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 - Open `.html` / `.htm` files
 - Click highlighted visible text and edit it directly
 - Format a selected text range with bold, italic, underline, font size, text color, or background color
-- Preserve existing tags, classes, inline styles, CSS, and surrounding markup outside the selected formatting range
+- Create and edit basic HTML tables without serializing the whole document
+- Preserve existing tags, classes, inline styles, CSS, and surrounding markup outside the selected edit range
 - Preview the modified HTML before saving in a read-only final-render view
 - Review Editor changes with a navigable diff, previous/next controls, and an overview rail
 - Undo / redo committed text edits
@@ -79,6 +80,30 @@ The first formatting version requires the selection to stay inside one editable 
 
 Visual Compare continues to compare visible text content. Formatting-only HTML differences are visible in **Source Compare**.
 
+## Basic table editing
+
+In **Edit** mode, the **+ Table** action inserts a new simple table after the current text block. If no text block is active, the table is inserted before the closing `</body>`. New tables can be created with 1–20 rows and 1–12 columns.
+
+When a table cell is selected, contextual controls appear for:
+
+- insert row above / below
+- delete row
+- insert column left / right
+- delete column
+- delete the entire table
+
+New rows and columns preserve the selected table's basic cell/row classes and inline styles where practical, but do not clone cell content or unique IDs. Empty inserted cells use an editable placeholder so they can be filled immediately.
+
+Automatic row/column insertion and column deletion are intentionally limited to **simple tables**: rectangular tables without nested tables, `rowspan`, or `colspan`. Complex tables can still have an explicit row or entire table removed with exact source-range patches, while more involved restructuring should use Source view.
+
+Table operations participate in the same Editor Undo/Redo history as text and rich-text formatting.
+
+### Tables in Compare
+
+Visual Compare continues to treat inserted/deleted table structure conservatively. A newly inserted row or column is highlighted as a structural difference and is **not** given a text-only Visual merge action. Source Compare remains the supported way to merge structural table changes.
+
+A later table-aware Compare layer can add row-level alignment and row-level ← / → merge without weakening the current source-preservation guarantees.
+
 ## Open-directory behavior
 
 The app remembers the most recently opened directory in Electron's per-user `userData/settings.json`. It does not blindly trust that path.
@@ -137,7 +162,7 @@ The first version focuses on static HTML content. It intentionally does not edit
 - `<option>`
 - SVG / MathML / canvas content
 
-Pages whose visible content is generated only by JavaScript will not expose that generated text for editing. Rich text formatting currently applies only to a selection within one editable text block; cross-element selections are intentionally rejected.
+Pages whose visible content is generated only by JavaScript will not expose that generated text for editing. Rich text formatting currently applies only to a selection within one editable text block; cross-element selections are intentionally rejected. Complex table layouts with nested tables, rowspan, or colspan are not automatically reflowed by row/column insertion logic.
 
 The Edit view temporarily wraps editable text in helper spans, so a page with unusually strict CSS selectors may look slightly different while editing. **Preview does not contain those wrappers**, and is the authoritative layout check before saving.
 
@@ -162,7 +187,7 @@ Real Electron UI validation:
 npm run test:ui
 ```
 
-The Windows CI runs unit tests and Electron UI validation on pull requests. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, verifies that deep-document edits preserve the current Compare viewport, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, validates selection-based rich text formatting and formatting Undo/Redo, edits visible text, and validates Edit/Preview behavior plus Editor diff navigation/rail markers. UI validation screenshots are retained for 7 days.
+The Windows CI runs unit tests and Electron UI validation on pull requests. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, verifies that deep-document edits preserve the current Compare viewport, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, validates rich text formatting, creates and structurally edits a simple table with Undo, edits visible text, and validates Edit/Preview behavior plus Editor diff navigation/rail markers. UI validation screenshots are retained for 7 days.
 
 ## Build for Windows
 
