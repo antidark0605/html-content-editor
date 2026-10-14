@@ -1066,8 +1066,8 @@ function activateCaretColor(target, color) {
     typingSpan.style.color = color;
   }
 
-  setCaretInsideTypingSpan(doc, typingSpan);
-  editable.focus();
+  elements.pageFrame.contentWindow?.focus();
+  editable.focus({ preventScroll: true });
   setCaretInsideTypingSpan(doc, typingSpan);
 
   state.richSelection = null;
