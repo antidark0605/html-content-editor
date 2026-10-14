@@ -438,7 +438,149 @@ function updateFormatControls() {
 function clearRichSelection() {
   state.richSelection = null;
   updateFormatControls();
+  updateTableControls();
 }
+
+function updateTableControls() {
+  const selection = state.tableSelection;
+  const table = selection
+    ? state.tables.find((candidate) => candidate.id === selection.tableId)
+    : null;
+
+  const active = Boolean(selection && table) &&
+    state.workspaceMode === 'editor' &&
+    state.mode === 'edit';
+
+  elements.tableContextTools.classList.toggle('hidden', !active);
+
+  if (!active) {
+    elements.tableSelectionHint.textContent = '';
+    return;
+  }
+
+  const simple = Boolean(table.simple);
+  const rowCount = table.rowCount ?? 0;
+  const columnCount = table.columnCount ?? 0;
+
+  elements.insertRowAboveButton.disabled = !simple;
+  elements.insertRowBelowButton.disabled = !simple;
+  elements.deleteRowButton.disabled = rowCount <= 1;
+  elements.insertColumnLeftButton.disabled = !simple;
+  elements.insertColumnRightButton.disabled = !simple;
+  elements.deleteColumnButton.disabled = !simple || columnCount <= 1;
+  elements.deleteTableButton.disabled = false;
+
+  elements.tableSelectionHint.textContent = simple
+    ? `Simple table · ${rowCount} × ${columnCount}`
+    : 'Complex table · row/column insertion disabled; Source view for structural work';
+}
+
+function clearTableSelection(doc = elements.pageFrame.contentDocument) {
+  state.tableSelection = null;
+
+  if (doc) {
+    for (const cell of doc.querySelectorAll('.hce-table-cell-selected')) {
+      cell.classList.remove('hce-table-cell-selected');
+    }
+  }
+
+  updateTableControls();
+}
+
+function selectTableCell(cell) {
+  const tableId = cell?.dataset?.hceTableId;
+  const rowId = cell?.dataset?.hceRowId;
+  const columnIndex = Number.parseInt(cell?.dataset?.hceColumnIndex ?? '', 10);
+
+  if (!tableId || !rowId || !Number.isInteger(columnIndex)) {
+    clearTableSelection(cell?.ownerDocument);
+    return;
+  }
+
+  const doc = cell.ownerDocument;
+  for (const selected of doc.querySelectorAll('.hce-table-cell-selected')) {
+    selected.classList.remove('hce-table-cell-selected');
+  }
+  cell.classList.add('hce-table-cell-selected');
+
+  state.tableSelection = { tableId, rowId, columnIndex };
+  updateTableControls();
+}
+
+function wireTableContext(doc) {
+  const domTables = [...doc.querySelectorAll('table')];
+
+  domTables.forEach((tableElement, tableIndex) => {
+    const table = state.tables[tableIndex];
+    if (!table) return;
+
+    tableElement.dataset.hceTableId = table.id;
+
+    const domRows = [...tableElement.rows].filter(
+      (row) => row.closest('table') === tableElement
+    );
+
+    domRows.forEach((rowElement, rowIndex) => {
+      const row = table.rows[rowIndex];
+      if (!row) return;
+
+      rowElement.dataset.hceTableId = table.id;
+      rowElement.dataset.hceRowId = row.id;
+
+      const cells = [...rowElement.cells];
+      cells.forEach((cellElement, columnIndex) => {
+        const cell = row.cells[columnIndex];
+        if (!cell) return;
+
+        cellElement.dataset.hceCellId = cell.id;
+        cellElement.dataset.hceTableId = table.id;
+        cellElement.dataset.hceRowId = row.id;
+        cellElement.dataset.hceColumnIndex = String(columnIndex);
+
+        cellElement.addEventListener('click', () => selectTableCell(cellElement));
+        cellElement.addEventListener('focusin', () => selectTableCell(cellElement));
+      });
+    });
+  });
+
+  updateTableControls();
+}
+
+async function applyTableOperation(request, confirmation = null) {
+  if (state.mode !== 'edit') return;
+
+  if (confirmation && !window.confirm(confirmation)) return;
+
+  const viewport = captureEditorViewport();
+  await flushPendingEdits();
+
+  const before = snapshotEditorState();
+  const result = await window.hce.tableOperation(request);
+
+  if (!result.ok) {
+    showToast(result.reason);
+    return;
+  }
+
+  state.editorSource = result.editSource;
+  state.editorTextNodes = result.textNodes;
+  state.tables = result.tables ?? [];
+  state.edits = {};
+  state.workingSource = result.workingSource;
+  setDirty(result.dirty);
+  updateEditableCount();
+  clearRichSelection();
+  clearTableSelection();
+
+  const after = snapshotEditorState();
+  state.undoStack.push({ type: 'snapshot', before, after });
+  state.redoStack.length = 0;
+  updateHistoryButtons();
+
+  state.pendingEditorViewportRestore = viewport;
+  renderEdit();
+}
+
 
 function captureRichSelection(doc) {
   const selection = doc.getSelection();
@@ -514,6 +656,7 @@ function snapshotEditorState() {
   return {
     editorSource: state.editorSource,
     editorTextNodes: state.editorTextNodes.map((node) => ({ ...node })),
+    tables: state.tables.map((table) => structuredClone(table)),
     edits: { ...state.edits },
     workingSource: state.workingSource
   };
@@ -522,11 +665,13 @@ function snapshotEditorState() {
 async function restoreEditorSnapshot(snapshot) {
   state.editorSource = snapshot.editorSource;
   state.editorTextNodes = snapshot.editorTextNodes.map((node) => ({ ...node }));
+  state.tables = (snapshot.tables ?? []).map((table) => structuredClone(table));
   state.edits = { ...snapshot.edits };
   state.workingSource = snapshot.workingSource;
   await rebuildWorkingSource();
   updateEditableCount();
   clearRichSelection();
+  clearTableSelection();
 }
 
 async function applyTextFormat(format, value = null) {
@@ -555,6 +700,7 @@ async function applyTextFormat(format, value = null) {
 
   state.editorSource = result.editSource;
   state.editorTextNodes = result.textNodes;
+  state.tables = result.tables ?? state.tables;
   state.edits = {};
   state.workingSource = result.workingSource;
   setDirty(result.dirty);
@@ -590,10 +736,17 @@ function wireEditableFrame() {
   );
 
   doc.addEventListener('selectionchange', () => captureRichSelection(doc));
+  wireTableContext(doc);
 
   for (const editable of doc.querySelectorAll('[data-hce-id]')) {
     editable.addEventListener('focus', () => {
       editable.dataset.hceBefore = editable.textContent ?? '';
+      state.lastEditorNodeId = editable.dataset.hceId ?? null;
+
+      const cell = editable.closest('td, th');
+      if (cell?.dataset?.hceCellId) {
+        selectTableCell(cell);
+      }
     });
 
     editable.addEventListener('keydown', (event) => {
