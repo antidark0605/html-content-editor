@@ -2586,7 +2586,9 @@ function loadSession(session) {
   state.tables = session.tables ?? [];
   state.workingSource = session.workingSource ?? session.source;
   state.richSelection = null;
+  state.editorCaret = null;
   state.tableSelection = null;
+  closeColorPalette();
   state.lastEditorNodeId = null;
   state.pendingEditorViewportRestore = null;
   state.undoStack = [];
@@ -2813,12 +2815,38 @@ elements.formatFontSize.addEventListener('change', () => {
   elements.formatFontSize.value = '';
 });
 
-elements.formatTextColor.addEventListener('change', () => {
-  void applyTextFormat('color', elements.formatTextColor.value);
+for (const [button, target] of [
+  [elements.textColorButton, 'text'],
+  [elements.backgroundColorButton, 'background']
+]) {
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('click', () => openColorPalette(target));
+}
+
+elements.colorPalette.addEventListener('mousedown', (event) => {
+  event.preventDefault();
 });
 
-elements.formatBackgroundColor.addEventListener('change', () => {
-  void applyTextFormat('backgroundColor', elements.formatBackgroundColor.value);
+elements.otherColorsButton.addEventListener('click', () => {
+  elements.otherColorsInput.value = colorValueForTarget(state.colorPaletteTarget);
+  elements.otherColorsInput.click();
+});
+
+elements.otherColorsInput.addEventListener('change', () => {
+  void applyPaletteColor(elements.otherColorsInput.value);
+});
+
+document.addEventListener('mousedown', (event) => {
+  if (elements.colorPalette.classList.contains('hidden')) return;
+
+  const insidePalette = elements.colorPalette.contains(event.target);
+  const onColorButton =
+    elements.textColorButton.contains(event.target) ||
+    elements.backgroundColorButton.contains(event.target);
+
+  if (!insidePalette && !onColorButton) {
+    closeColorPalette();
+  }
 });
 
 elements.insertTableButton.addEventListener('click', showInsertTableDialog);
@@ -2971,6 +2999,12 @@ document.addEventListener('drop', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !elements.colorPalette.classList.contains('hidden')) {
+    event.preventDefault();
+    closeColorPalette();
+    return;
+  }
+
   const modifier = event.ctrlKey || event.metaKey;
 
   if (state.workspaceMode === 'editor' && state.mode === 'diff' && modifier && event.altKey && event.key === 'ArrowDown') {
@@ -3065,6 +3099,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+buildColorPalette();
 renderCompareSide('left');
 renderCompareSide('right');
 setCompareZoom(1);
