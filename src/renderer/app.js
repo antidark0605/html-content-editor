@@ -546,6 +546,48 @@ function wireTableContext(doc) {
   updateTableControls();
 }
 
+function showInsertTableDialog() {
+  if (state.mode !== 'edit' || !state.session) return;
+
+  elements.insertTableRows.value = '2';
+  elements.insertTableColumns.value = '2';
+
+  if (!elements.insertTableDialog.open) {
+    elements.insertTableDialog.showModal();
+  }
+
+  window.requestAnimationFrame(() => {
+    elements.insertTableRows.focus();
+    elements.insertTableRows.select();
+  });
+}
+
+async function confirmInsertTable() {
+  const rows = Number.parseInt(elements.insertTableRows.value, 10);
+  const columns = Number.parseInt(elements.insertTableColumns.value, 10);
+
+  if (!Number.isInteger(rows) || rows < 1 || rows > 20) {
+    showToast('Rows must be between 1 and 20.');
+    return;
+  }
+
+  if (!Number.isInteger(columns) || columns < 1 || columns > 12) {
+    showToast('Columns must be between 1 and 12.');
+    return;
+  }
+
+  elements.insertTableDialog.close();
+
+  await applyTableOperation({
+    operation: 'insert-table',
+    rows,
+    columns,
+    anchorNodeId: state.lastEditorNodeId
+  });
+
+  showToast(`Inserted ${rows} × ${columns} table.`);
+}
+
 async function applyTableOperation(request, confirmation = null) {
   if (state.mode !== 'edit') return;
 
@@ -2091,8 +2133,11 @@ function loadSession(session) {
   state.edits = {};
   state.editorSource = session.editSource ?? session.workingSource ?? session.source;
   state.editorTextNodes = session.textNodes ?? [];
+  state.tables = session.tables ?? [];
   state.workingSource = session.workingSource ?? session.source;
   state.richSelection = null;
+  state.tableSelection = null;
+  state.lastEditorNodeId = null;
   state.pendingEditorViewportRestore = null;
   state.undoStack = [];
   state.redoStack = [];
