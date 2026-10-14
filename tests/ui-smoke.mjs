@@ -561,16 +561,16 @@ try {
   await page.locator('#backgroundColorButton').click();
   await page.locator('#colorPalette .color-swatch[data-color="#d9eaf7"]').first().click();
 
+  await editorFrame.locator(caretSelector).pressSequentially(' COLORED');
+
   const transientTypingSpan = editorFrame.locator('[data-hce-typing-style]').last();
   await transientTypingSpan.waitFor({ state: 'attached' });
   assert.equal(await transientTypingSpan.getAttribute('data-hce-color'), '#0070c0');
   assert.equal(await transientTypingSpan.getAttribute('data-hce-background-color'), '#d9eaf7');
-
-  await editorFrame.locator(caretSelector).pressSequentially(' COLORED');
   assert.equal(
     await transientTypingSpan.textContent(),
     ' COLORED',
-    'Expected keyboard input to remain inside the active caret-style span'
+    'Expected keyboard input to be inserted with the active caret colors'
   );
 
   await page.locator('#fileName').click();
