@@ -582,6 +582,8 @@ function updateFormatControls() {
 function clearRichSelection() {
   state.richSelection = null;
   state.editorCaret = null;
+  state.caretTypingStyle = null;
+  state.compositionState = null;
   closeColorPalette();
   updateFormatControls();
   updateTableControls();
@@ -820,16 +822,26 @@ function captureRichSelection(doc) {
   state.lastEditorNodeId = startElement.dataset.hceId ?? state.lastEditorNodeId;
 
   if (selection.isCollapsed || end <= start) {
+    const nodeId = startElement.dataset.hceId;
+
     state.richSelection = null;
     state.editorCaret = {
-      nodeId: startElement.dataset.hceId,
+      nodeId,
       offset: start
     };
+
+    if (state.caretTypingStyle?.nodeId !== nodeId) {
+      state.caretTypingStyle = null;
+      state.compositionState = null;
+    }
+
     updateFormatControls();
     return;
   }
 
   state.editorCaret = null;
+  state.caretTypingStyle = null;
+  state.compositionState = null;
   state.richSelection = {
     nodeId: startElement.dataset.hceId,
     expectedText: startElement.textContent ?? '',
