@@ -326,7 +326,7 @@ function buildEditableDocument() {
       : source.slice(node.start, node.end);
 
     parts.push(
-      `<span data-hce-id="${node.id}" contenteditable="true" spellcheck="false">${content}</span>`
+      `<span data-hce-id="${node.id}" contenteditable="plaintext-only" spellcheck="false">${content}</span>`
     );
     cursor = node.end;
   }
