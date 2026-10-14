@@ -347,3 +347,67 @@ export function applyInlineFormatting(
     source.slice(node.end)
   );
 }
+
+
+function normalizedTypingStyle(style) {
+  if (!style || typeof style !== 'object') return null;
+
+  const parts = [];
+
+  if (style.color !== undefined && style.color !== null) {
+    if (typeof style.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(style.color)) {
+      throw new Error('Invalid text color value.');
+    }
+    parts.push(`color: ${style.color.toLowerCase()};`);
+  }
+
+  if (style.backgroundColor !== undefined && style.backgroundColor !== null) {
+    if (
+      typeof style.backgroundColor !== 'string' ||
+      !/^#[0-9a-fA-F]{6}$/.test(style.backgroundColor)
+    ) {
+      throw new Error('Invalid background color value.');
+    }
+    parts.push(`background-color: ${style.backgroundColor.toLowerCase()};`);
+  }
+
+  return parts.length > 0 ? parts.join(' ') : null;
+}
+
+export function applyStyledTextSegments(source, { nodeId, segments } = {}) {
+  if (typeof source !== 'string') {
+    throw new Error('Invalid HTML source.');
+  }
+
+  if (typeof nodeId !== 'string' || !Array.isArray(segments)) {
+    throw new Error('Invalid styled text edit.');
+  }
+
+  const textNodes = extractEditableTextNodes(source);
+  const node = textNodes.find((candidate) => candidate.id === nodeId);
+
+  if (!node) {
+    throw new Error('The edited text block no longer exists.');
+  }
+
+  const replacement = segments.map((segment) => {
+    if (!segment || typeof segment.text !== 'string') {
+      throw new Error('Invalid styled text segment.');
+    }
+
+    if (segment.text.length === 0) return '';
+
+    const escaped = escapeHtmlText(segment.text);
+    const style = normalizedTypingStyle(segment.style);
+
+    return style
+      ? `<span style="${style}">${escaped}</span>`
+      : escaped;
+  }).join('');
+
+  return (
+    source.slice(0, node.start) +
+    replacement +
+    source.slice(node.end)
+  );
+}
