@@ -331,6 +331,7 @@ main {
   min-height: 42px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 7px;
   padding: 6px 14px;
   background: #f8fafc;
@@ -412,6 +413,99 @@ main {
 
 .format-toolbar.selection-ready .format-hint {
   color: #475569;
+}
+
+.toolbar-separator {
+  align-self: stretch;
+  width: 1px;
+  min-height: 24px;
+  margin-inline: 4px;
+  background: #d7dde5;
+}
+
+.table-context-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.table-column-label {
+  margin-left: 5px;
+}
+
+.table-button {
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.danger-light {
+  color: #9b2c2c;
+}
+
+.danger-light:hover:not(:disabled) {
+  background: #fff1f1;
+  border-color: #e4b1b1;
+}
+
+.insert-table-dialog {
+  width: min(420px, calc(100vw - 40px));
+  border: 1px solid #cbd3de;
+  border-radius: 12px;
+  padding: 0;
+  color: #1f2937;
+  box-shadow: 0 20px 60px rgb(15 23 42 / 24%);
+}
+
+.insert-table-dialog::backdrop {
+  background: rgb(15 23 42 / 35%);
+}
+
+.insert-table-dialog form {
+  padding: 22px;
+}
+
+.insert-table-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+
+.insert-table-dialog p {
+  margin: 0 0 18px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.insert-table-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.insert-table-fields label {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.insert-table-fields input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #c9d0da;
+  border-radius: 7px;
+  padding: 0 9px;
+  background: #fff;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
 }
 
 .frame-host {
