@@ -562,7 +562,7 @@ try {
   await page.locator('#colorPalette .color-swatch[data-color="#d9eaf7"]').first().click();
 
   const transientTypingSpan = editorFrame.locator('[data-hce-typing-style]').last();
-  await transientTypingSpan.waitFor();
+  await transientTypingSpan.waitFor({ state: 'attached' });
   assert.equal(await transientTypingSpan.getAttribute('data-hce-color'), '#0070c0');
   assert.equal(await transientTypingSpan.getAttribute('data-hce-background-color'), '#d9eaf7');
 
