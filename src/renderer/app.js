@@ -119,6 +119,7 @@ const state = {
   scrollDriverTimer: null,
   programmaticUntil: { left: 0, right: 0 },
   pendingInitialDifferenceScroll: false,
+  pendingVisualViewportRestore: null,
   visualCenterGeneration: 0,
   appInfo: null
 };
@@ -994,6 +995,87 @@ function scrollingElement(frame) {
     ?? null;
 }
 
+function captureFrameViewport(side) {
+  const frame = side === 'left' ? elements.compareLeftFrame : elements.compareRightFrame;
+  const doc = frame.contentDocument;
+  const scroller = scrollingElement(frame);
+  if (!doc || !scroller || scroller.clientHeight <= 0) return null;
+
+  const viewportCenter = scroller.clientHeight / 2;
+  let best = null;
+
+  for (const node of doc.querySelectorAll('[data-hce-compare-id]')) {
+    const rect = node.getBoundingClientRect();
+    const center = rect.top + rect.height / 2;
+    const distance = Math.abs(center - viewportCenter);
+
+    if (!best || distance < best.distance) {
+      best = {
+        id: node.dataset.hceCompareId,
+        offset: center - viewportCenter,
+        distance
+      };
+    }
+  }
+
+  return {
+    anchorId: best?.id ?? null,
+    anchorOffset: best?.offset ?? 0,
+    ratio: scrollRatio(scroller.scrollTop, scroller.scrollHeight, scroller.clientHeight)
+  };
+}
+
+function captureVisualViewport() {
+  if (state.compareView !== 'visual') return null;
+
+  const left = captureFrameViewport('left');
+  const right = captureFrameViewport('right');
+  if (!left && !right) return null;
+
+  return { left, right };
+}
+
+function restoreFrameViewport(side, snapshot) {
+  if (!snapshot) return;
+
+  const frame = side === 'left' ? elements.compareLeftFrame : elements.compareRightFrame;
+  const doc = frame.contentDocument;
+  const scroller = scrollingElement(frame);
+  if (!doc || !scroller) return;
+
+  let nextTop = null;
+  if (snapshot.anchorId) {
+    const anchorNode = doc.querySelector(
+      `[data-hce-compare-id="${snapshot.anchorId}"]`
+    );
+
+    if (anchorNode) {
+      const rect = anchorNode.getBoundingClientRect();
+      const absoluteCenter = rect.top + scroller.scrollTop + rect.height / 2;
+      nextTop = absoluteCenter - scroller.clientHeight / 2 - snapshot.anchorOffset;
+    }
+  }
+
+  if (!Number.isFinite(nextTop)) {
+    nextTop = scrollTopForRatio(
+      snapshot.ratio ?? 0,
+      scroller.scrollHeight,
+      scroller.clientHeight
+    );
+  }
+
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  state.programmaticUntil[side] = performance.now() + 180;
+  scroller.scrollTop = Math.max(0, Math.min(maxTop, nextTop));
+}
+
+function restoreVisualViewport(snapshot) {
+  if (!snapshot) return;
+  restoreFrameViewport('left', snapshot.left);
+  restoreFrameViewport('right', snapshot.right);
+}
+
+
 function applyCompareZoom(frame) {
   const doc = frame.contentDocument;
   if (!doc?.documentElement) return;
@@ -1225,12 +1307,18 @@ function wireCompareFrame(side) {
 
   if (state.compareFrameReady.left && state.compareFrameReady.right) {
     window.requestAnimationFrame(() => {
+      const viewportRestore = state.pendingVisualViewportRestore;
+      if (viewportRestore) {
+        state.pendingVisualViewportRestore = null;
+        restoreVisualViewport(viewportRestore);
+      }
+
       rebuildAlignmentPoints();
       markActiveVisualHunk();
       renderVisualMergeGutter();
       updateDifferenceRail();
 
-      if (state.pendingInitialDifferenceScroll && currentHunks().length > 0) {
+      if (!viewportRestore && state.pendingInitialDifferenceScroll && currentHunks().length > 0) {
         state.pendingInitialDifferenceScroll = false;
         setActiveDifference(state.activeDifferenceIndex, true);
       }
@@ -1402,6 +1490,9 @@ async function setCompareView(view) {
 }
 
 function applyCompareResult(result, options = {}) {
+  const preserveVisualViewport = options.preserveVisualViewport ?? options.keepIndex ?? false;
+  const viewportSnapshot = preserveVisualViewport ? captureVisualViewport() : null;
+
   if (result?.state) {
     state.compare.left = result.state.left;
     state.compare.right = result.state.right;
@@ -1420,6 +1511,8 @@ function applyCompareResult(result, options = {}) {
   if (!options.keepIndex && hunkCount > 0) {
     state.pendingInitialDifferenceScroll = true;
   }
+
+  state.pendingVisualViewportRestore = viewportSnapshot;
   renderCompare();
 }
 
