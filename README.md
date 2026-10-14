@@ -12,7 +12,8 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 
 - Open `.html` / `.htm` files
 - Click highlighted visible text and edit it directly
-- Preserve existing tags, classes, inline styles, CSS, and surrounding markup
+- Format a selected text range with bold, italic, underline, font size, text color, or background color
+- Preserve existing tags, classes, inline styles, CSS, and surrounding markup outside the selected formatting range
 - Preview the modified HTML before saving in a read-only final-render view
 - Review Editor changes with a navigable diff, previous/next controls, and an overview rail
 - Undo / redo committed text edits
@@ -60,6 +61,23 @@ Existing unsaved-change confirmation behavior is preserved. Each open file also 
 - **Edit**: directly edit visible text. The app temporarily wraps editable text nodes with helper elements so they can receive focus.
 - **Preview**: read-only final rendering of the current working HTML without those editing helpers. Use this as the authoritative layout check.
 - **Diff**: compare the original file with the current working copy. The diff view provides previous/next navigation and a right-side overview rail whose markers map to the rendered difference positions.
+
+## Rich text formatting
+
+In **Edit** mode, select text inside one editable text block and use the formatting bar to apply:
+
+- bold
+- italic
+- underline
+- font sizes from 12–32 px
+- text color
+- text background color
+
+Formatting is intentionally constrained rather than acting like a general-purpose word processor. A formatting operation inserts a small inline `<span style="...">` only around the selected text. The surrounding HTML is left untouched, and formatting changes participate in the same Editor Undo/Redo history as normal text edits.
+
+The first formatting version requires the selection to stay inside one editable text node. A selection that crosses existing HTML element boundaries is not formatted automatically because doing so could restructure the original markup.
+
+Visual Compare continues to compare visible text content. Formatting-only HTML differences are visible in **Source Compare**.
 
 ## Open-directory behavior
 
@@ -119,7 +137,7 @@ The first version focuses on static HTML content. It intentionally does not edit
 - `<option>`
 - SVG / MathML / canvas content
 
-Pages whose visible content is generated only by JavaScript will not expose that generated text for editing in v0.5.
+Pages whose visible content is generated only by JavaScript will not expose that generated text for editing. Rich text formatting currently applies only to a selection within one editable text block; cross-element selections are intentionally rejected.
 
 The Edit view temporarily wraps editable text in helper spans, so a page with unusually strict CSS selectors may look slightly different while editing. **Preview does not contain those wrappers**, and is the authoritative layout check before saving.
 
@@ -144,7 +162,7 @@ Real Electron UI validation:
 npm run test:ui
 ```
 
-The Windows CI runs unit tests and Electron UI validation on pull requests. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, verifies that deep-document edits preserve the current Compare viewport, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, edits visible text, and validates Edit/Preview behavior plus Editor diff navigation/rail markers. UI validation screenshots are retained for 7 days.
+The Windows CI runs unit tests and Electron UI validation on pull requests. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, verifies that deep-document edits preserve the current Compare viewport, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, validates selection-based rich text formatting and formatting Undo/Redo, edits visible text, and validates Edit/Preview behavior plus Editor diff navigation/rail markers. UI validation screenshots are retained for 7 days.
 
 ## Build for Windows
 
