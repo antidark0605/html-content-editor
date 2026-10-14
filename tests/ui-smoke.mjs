@@ -157,13 +157,13 @@ try {
   const page = await electronApp.firstWindow();
 
   await page.waitForFunction(() =>
-    document.querySelector('#appVersion')?.textContent === 'v0.8.0'
+    document.querySelector('#appVersion')?.textContent === 'v0.9.0'
   );
-  assert.equal(await page.locator('#appVersion').textContent(), 'v0.8.0');
+  assert.equal(await page.locator('#appVersion').textContent(), 'v0.9.0');
 
   await page.locator('#aboutButton').click();
   await page.waitForSelector('#aboutDialog[open]');
-  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.8.0');
+  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.9.0');
   assert.match(await page.locator('#aboutBuild').textContent() ?? '', /^Build (development|[0-9a-f]{8})$/);
   assert.ok((await page.locator('#aboutElectron').textContent())?.length > 0);
   assert.ok((await page.locator('#aboutPlatform').textContent())?.includes('win32'));
