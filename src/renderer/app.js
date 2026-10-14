@@ -416,8 +416,101 @@ async function recordEdit(id, value, beforeOverride = null) {
   updateHistoryButtons();
 }
 
+function styledSegmentsFromEditable(editable) {
+  const segments = [];
+
+  const pushSegment = (text, style = null) => {
+    if (!text) return;
+
+    const previous = segments.at(-1);
+    const sameStyle = JSON.stringify(previous?.style ?? null) === JSON.stringify(style);
+
+    if (previous && sameStyle) {
+      previous.text += text;
+      return;
+    }
+
+    segments.push({ text, ...(style ? { style } : {}) });
+  };
+
+  for (const child of editable.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      pushSegment(child.nodeValue ?? '');
+      continue;
+    }
+
+    if (
+      child.nodeType === Node.ELEMENT_NODE &&
+      child.matches?.('[data-hce-typing-style]')
+    ) {
+      const style = {};
+      if (child.dataset.hceColor) style.color = child.dataset.hceColor;
+      if (child.dataset.hceBackgroundColor) {
+        style.backgroundColor = child.dataset.hceBackgroundColor;
+      }
+
+      pushSegment(child.textContent ?? '', Object.keys(style).length > 0 ? style : null);
+      continue;
+    }
+
+    pushSegment(child.textContent ?? '');
+  }
+
+  return segments;
+}
+
+function hasCommittedTypingStyle(editable) {
+  return [...editable.querySelectorAll('[data-hce-typing-style]')]
+    .some((node) => (node.textContent ?? '').length > 0);
+}
+
+async function commitStyledEditableElement(editable) {
+  const id = editable.dataset.hceId;
+  const viewport = captureEditorViewport();
+  const before = snapshotEditorState();
+  const segments = styledSegmentsFromEditable(editable);
+
+  const result = await window.hce.commitStyledText({
+    nodeId: id,
+    segments
+  });
+
+  if (!result.ok) {
+    showToast(result.reason);
+    return false;
+  }
+
+  state.editorSource = result.editSource;
+  state.editorTextNodes = result.textNodes;
+  state.tables = result.tables ?? state.tables;
+  state.edits = {};
+  state.workingSource = result.workingSource;
+  state.lastEditorNodeId = null;
+  setDirty(result.dirty);
+  updateEditableCount();
+  clearRichSelection();
+
+  const after = snapshotEditorState();
+  state.undoStack.push({ type: 'snapshot', before, after });
+  state.redoStack.length = 0;
+  updateHistoryButtons();
+
+  state.pendingEditorViewportRestore = viewport;
+  renderEdit();
+  return true;
+}
+
 async function commitEditableElement(editable) {
   if (!editable?.matches?.('[data-hce-id]')) return;
+
+  for (const emptySpan of editable.querySelectorAll('[data-hce-typing-style]:empty')) {
+    emptySpan.remove();
+  }
+
+  if (hasCommittedTypingStyle(editable)) {
+    await commitStyledEditableElement(editable);
+    return;
+  }
 
   const id = editable.dataset.hceId;
   const before = editable.dataset.hceBefore ?? currentValueFor(id);
