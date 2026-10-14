@@ -43,6 +43,12 @@ const elements = {
   dirtyBadge: document.querySelector('#dirtyBadge'),
   copyEditorPathButton: document.querySelector('#copyEditorPathButton'),
   editorModeHint: document.querySelector('#editorModeHint'),
+  formatToolbar: document.querySelector('#formatToolbar'),
+  formatButtons: [...document.querySelectorAll('[data-text-format]')],
+  formatFontSize: document.querySelector('#formatFontSize'),
+  formatTextColor: document.querySelector('#formatTextColor'),
+  formatBackgroundColor: document.querySelector('#formatBackgroundColor'),
+  formatSelectionHint: document.querySelector('#formatSelectionHint'),
   editableCount: document.querySelector('#editableCount'),
   scriptWarning: document.querySelector('#scriptWarning'),
   frameHost: document.querySelector('#frameHost'),
@@ -95,7 +101,11 @@ const elements = {
 const state = {
   session: null,
   edits: {},
+  editorSource: '',
+  editorTextNodes: [],
   workingSource: '',
+  richSelection: null,
+  pendingEditorViewportRestore: null,
   mode: 'edit',
   undoStack: [],
   redoStack: [],
@@ -230,7 +240,8 @@ function compareStyle() {
 }
 
 function buildEditableDocument() {
-  const { source, textNodes } = state.session;
+  const source = state.editorSource;
+  const textNodes = state.editorTextNodes;
   const parts = [];
   let cursor = 0;
 
@@ -299,7 +310,7 @@ function updateHistoryButtons() {
 }
 
 function nodeById(id) {
-  return state.session.textNodes.find((node) => node.id === id);
+  return state.editorTextNodes.find((node) => node.id === id);
 }
 
 function currentValueFor(id) {
@@ -309,7 +320,7 @@ function currentValueFor(id) {
 }
 
 async function rebuildWorkingSource() {
-  const result = await window.hce.applyEdits(state.edits);
+  const result = await window.hce.applyEdits(state.editorSource, state.edits);
   state.workingSource = result.workingSource;
   setDirty(result.dirty);
 }
@@ -321,7 +332,7 @@ async function recordEdit(id, value, beforeOverride = null) {
   const before = beforeOverride ?? currentValueFor(id);
   if (value === before) return;
 
-  state.undoStack.push({ id, before, after: value });
+  state.undoStack.push({ type: 'text', id, before, after: value });
   state.redoStack.length = 0;
 
   if (value === node.text) {
@@ -366,6 +377,167 @@ async function flushPendingEdits() {
   await state.pendingCommit;
 }
 
+function updateEditableCount() {
+  const count = state.editorTextNodes.length;
+  elements.editableCount.textContent =
+    `${count} editable text block${count === 1 ? '' : 's'}`;
+}
+
+function updateFormatControls() {
+  const ready = Boolean(state.richSelection) &&
+    state.workspaceMode === 'editor' &&
+    state.mode === 'edit';
+
+  elements.formatToolbar.classList.toggle('selection-ready', ready);
+
+  for (const button of elements.formatButtons) {
+    button.disabled = !ready;
+  }
+
+  elements.formatFontSize.disabled = !ready;
+  elements.formatTextColor.disabled = !ready;
+  elements.formatBackgroundColor.disabled = !ready;
+
+  elements.formatSelectionHint.textContent = ready
+    ? `${state.richSelection.end - state.richSelection.start} characters selected`
+    : 'Select text in one editable block to format it.';
+}
+
+function clearRichSelection() {
+  state.richSelection = null;
+  updateFormatControls();
+}
+
+function captureRichSelection(doc) {
+  const selection = doc.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    clearRichSelection();
+    return;
+  }
+
+  const range = selection.getRangeAt(0);
+  const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE
+    ? range.startContainer.closest?.('[data-hce-id]')
+    : range.startContainer.parentElement?.closest?.('[data-hce-id]');
+  const endElement = range.endContainer.nodeType === Node.ELEMENT_NODE
+    ? range.endContainer.closest?.('[data-hce-id]')
+    : range.endContainer.parentElement?.closest?.('[data-hce-id]');
+
+  if (!startElement || startElement !== endElement) {
+    clearRichSelection();
+    return;
+  }
+
+  const beforeRange = doc.createRange();
+  beforeRange.selectNodeContents(startElement);
+  beforeRange.setEnd(range.startContainer, range.startOffset);
+
+  const selectedRange = doc.createRange();
+  selectedRange.selectNodeContents(startElement);
+  selectedRange.setEnd(range.endContainer, range.endOffset);
+
+  const start = beforeRange.toString().length;
+  const end = selectedRange.toString().length;
+  if (end <= start) {
+    clearRichSelection();
+    return;
+  }
+
+  state.richSelection = {
+    nodeId: startElement.dataset.hceId,
+    expectedText: startElement.textContent ?? '',
+    start,
+    end
+  };
+  updateFormatControls();
+}
+
+function captureEditorViewport() {
+  const scroller = elements.pageFrame.contentDocument?.scrollingElement;
+  if (!scroller || scroller.clientHeight <= 0) return null;
+
+  return {
+    scrollTop: scroller.scrollTop,
+    ratio: scrollRatio(scroller.scrollTop, scroller.scrollHeight, scroller.clientHeight)
+  };
+}
+
+function restoreEditorViewport(snapshot) {
+  if (!snapshot) return;
+  const scroller = elements.pageFrame.contentDocument?.scrollingElement;
+  if (!scroller) return;
+
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  const direct = Math.max(0, Math.min(maxTop, snapshot.scrollTop ?? 0));
+  const ratioTop = scrollTopForRatio(
+    snapshot.ratio ?? 0,
+    scroller.scrollHeight,
+    scroller.clientHeight
+  );
+
+  scroller.scrollTop = Number.isFinite(direct) ? direct : ratioTop;
+}
+
+function snapshotEditorState() {
+  return {
+    editorSource: state.editorSource,
+    editorTextNodes: state.editorTextNodes.map((node) => ({ ...node })),
+    edits: { ...state.edits },
+    workingSource: state.workingSource
+  };
+}
+
+async function restoreEditorSnapshot(snapshot) {
+  state.editorSource = snapshot.editorSource;
+  state.editorTextNodes = snapshot.editorTextNodes.map((node) => ({ ...node }));
+  state.edits = { ...snapshot.edits };
+  state.workingSource = snapshot.workingSource;
+  await rebuildWorkingSource();
+  updateEditableCount();
+  clearRichSelection();
+}
+
+async function applyTextFormat(format, value = null) {
+  if (!state.richSelection || state.mode !== 'edit') {
+    showToast('Select text in one editable block first.');
+    return;
+  }
+
+  const selection = { ...state.richSelection };
+  const viewport = captureEditorViewport();
+
+  await flushPendingEdits();
+
+  const before = snapshotEditorState();
+  const result = await window.hce.formatText({
+    ...selection,
+    format,
+    value
+  });
+
+  if (!result.ok) {
+    showToast(result.reason);
+    clearRichSelection();
+    return;
+  }
+
+  state.editorSource = result.editSource;
+  state.editorTextNodes = result.textNodes;
+  state.edits = {};
+  state.workingSource = result.workingSource;
+  setDirty(result.dirty);
+  updateEditableCount();
+  clearRichSelection();
+
+  const after = snapshotEditorState();
+  state.undoStack.push({ type: 'snapshot', before, after });
+  state.redoStack.length = 0;
+  updateHistoryButtons();
+
+  state.pendingEditorViewportRestore = viewport;
+  renderEdit();
+}
+
 function wireEditableFrame() {
   const doc = elements.pageFrame.contentDocument;
   if (!doc) return;
@@ -384,6 +556,8 @@ function wireEditableFrame() {
     },
     true
   );
+
+  doc.addEventListener('selectionchange', () => captureRichSelection(doc));
 
   for (const editable of doc.querySelectorAll('[data-hce-id]')) {
     editable.addEventListener('focus', () => {
@@ -408,6 +582,14 @@ function wireEditableFrame() {
   }
 
   runSearch(false);
+
+  const viewportRestore = state.pendingEditorViewportRestore;
+  if (viewportRestore) {
+    state.pendingEditorViewportRestore = null;
+    window.requestAnimationFrame(() => restoreEditorViewport(viewportRestore));
+  }
+
+  updateFormatControls();
 }
 
 function editorDiffHunks() {
@@ -512,6 +694,7 @@ function appendEditorDiffLine(container, kind, text) {
 }
 
 function renderEdit() {
+  elements.formatToolbar.classList.remove('hidden');
   elements.diffHost.classList.add('hidden');
   elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
@@ -524,6 +707,8 @@ function renderEdit() {
 }
 
 function renderPreview() {
+  elements.formatToolbar.classList.add('hidden');
+  clearRichSelection();
   elements.diffHost.classList.add('hidden');
   elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
@@ -537,6 +722,8 @@ function renderPreview() {
 }
 
 async function renderDiff() {
+  elements.formatToolbar.classList.add('hidden');
+  clearRichSelection();
   elements.frameHost.classList.add('hidden');
   elements.diffHost.classList.remove('hidden');
   elements.editorDiffNav.classList.remove('hidden');
@@ -1717,7 +1904,11 @@ async function handleDroppedFile(target, file) {
 function loadSession(session) {
   state.session = session;
   state.edits = {};
+  state.editorSource = session.editSource ?? session.workingSource ?? session.source;
+  state.editorTextNodes = session.textNodes ?? [];
   state.workingSource = session.workingSource ?? session.source;
+  state.richSelection = null;
+  state.pendingEditorViewportRestore = null;
   state.undoStack = [];
   state.redoStack = [];
   state.searchMatches = [];
@@ -1728,7 +1919,7 @@ function loadSession(session) {
   refreshWorkspaceVisibility();
   elements.fileName.textContent = session.fileName;
   elements.fileName.title = session.filePath;
-  elements.editableCount.textContent = `${session.textNodes.length} editable text block${session.textNodes.length === 1 ? '' : 's'}`;
+  updateEditableCount();
   elements.scriptWarning.classList.toggle('hidden', !session.hasScripts);
   elements.saveAsButton.disabled = false;
   elements.copyEditorPathButton.disabled = false;
@@ -1782,20 +1973,29 @@ async function undo() {
   const action = state.undoStack.pop();
   if (!action) return;
 
-  const node = nodeById(action.id);
-  if (!node) return;
-
+  const viewport = state.mode === 'edit' ? captureEditorViewport() : null;
   state.redoStack.push(action);
 
-  if (action.before === node.text) {
-    delete state.edits[action.id];
+  if (action.type === 'snapshot') {
+    await restoreEditorSnapshot(action.before);
   } else {
-    state.edits[action.id] = action.before;
+    const node = nodeById(action.id);
+    if (!node) return;
+
+    if (action.before === node.text) {
+      delete state.edits[action.id];
+    } else {
+      state.edits[action.id] = action.before;
+    }
+
+    await rebuildWorkingSource();
   }
 
-  await rebuildWorkingSource();
   updateHistoryButtons();
-  if (state.mode === 'edit') renderEdit();
+  if (state.mode === 'edit') {
+    state.pendingEditorViewportRestore = viewport;
+    renderEdit();
+  }
   if (state.mode === 'preview') renderPreview();
   if (state.mode === 'diff') await renderDiff();
 }
@@ -1804,20 +2004,29 @@ async function redo() {
   const action = state.redoStack.pop();
   if (!action) return;
 
-  const node = nodeById(action.id);
-  if (!node) return;
-
+  const viewport = state.mode === 'edit' ? captureEditorViewport() : null;
   state.undoStack.push(action);
 
-  if (action.after === node.text) {
-    delete state.edits[action.id];
+  if (action.type === 'snapshot') {
+    await restoreEditorSnapshot(action.after);
   } else {
-    state.edits[action.id] = action.after;
+    const node = nodeById(action.id);
+    if (!node) return;
+
+    if (action.after === node.text) {
+      delete state.edits[action.id];
+    } else {
+      state.edits[action.id] = action.after;
+    }
+
+    await rebuildWorkingSource();
   }
 
-  await rebuildWorkingSource();
   updateHistoryButtons();
-  if (state.mode === 'edit') renderEdit();
+  if (state.mode === 'edit') {
+    state.pendingEditorViewportRestore = viewport;
+    renderEdit();
+  }
   if (state.mode === 'preview') renderPreview();
   if (state.mode === 'diff') await renderDiff();
 }
@@ -1911,6 +2120,26 @@ elements.undoButton.addEventListener('click', undo);
 elements.redoButton.addEventListener('click', redo);
 elements.editorPreviousDifferenceButton.addEventListener('click', () => navigateEditorDiff(-1));
 elements.editorNextDifferenceButton.addEventListener('click', () => navigateEditorDiff(1));
+
+for (const button of elements.formatButtons) {
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('click', () => void applyTextFormat(button.dataset.textFormat));
+}
+
+elements.formatFontSize.addEventListener('change', () => {
+  const value = elements.formatFontSize.value;
+  if (!value) return;
+  void applyTextFormat('fontSize', value);
+  elements.formatFontSize.value = '';
+});
+
+elements.formatTextColor.addEventListener('change', () => {
+  void applyTextFormat('color', elements.formatTextColor.value);
+});
+
+elements.formatBackgroundColor.addEventListener('change', () => {
+  void applyTextFormat('backgroundColor', elements.formatBackgroundColor.value);
+});
 
 for (const button of elements.modeButtons) {
   button.addEventListener('click', () => void setMode(button.dataset.mode));

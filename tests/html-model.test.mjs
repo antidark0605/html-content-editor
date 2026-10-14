@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyInlineFormatting,
   applyTextEdits,
   buildEditableHtml,
   extractEditableTextNodes
@@ -46,6 +47,73 @@ test('supports separately editing text around nested formatting tags', () => {
   });
 
   assert.equal(updated, '<h2>Voice <strong>Streaming</strong> Overview</h2>');
+});
+
+test('applies inline formatting to only the selected text range', () => {
+  const source = '<p class="lead">Hello important world.</p>';
+  const node = extractEditableTextNodes(source)[0];
+
+  const updated = applyInlineFormatting(source, {
+    nodeId: node.id,
+    expectedText: node.text,
+    start: 6,
+    end: 15,
+    format: 'bold'
+  });
+
+  assert.equal(
+    updated,
+    '<p class="lead">Hello <span style="font-weight: 700;">important</span> world.</p>'
+  );
+  assert.match(updated, /class="lead"/);
+});
+
+test('supports controlled size and color formatting', () => {
+  const source = '<p>Alpha Beta</p>';
+  const node = extractEditableTextNodes(source)[0];
+
+  const sized = applyInlineFormatting(source, {
+    nodeId: node.id,
+    expectedText: node.text,
+    start: 0,
+    end: 5,
+    format: 'fontSize',
+    value: '20px'
+  });
+
+  const sizedNode = extractEditableTextNodes(sized).find((candidate) => candidate.text === 'Alpha');
+  const colored = applyInlineFormatting(sized, {
+    nodeId: sizedNode.id,
+    expectedText: sizedNode.text,
+    start: 0,
+    end: 5,
+    format: 'color',
+    value: '#D32F2F'
+  });
+
+  assert.match(sized, /font-size: 20px/);
+  assert.match(colored, /color: #d32f2f/);
+});
+
+test('rejects cross-node or stale formatting requests instead of guessing', () => {
+  const source = '<p>Hello <strong>world</strong></p>';
+  const node = extractEditableTextNodes(source)[0];
+
+  assert.throws(() => applyInlineFormatting(source, {
+    nodeId: node.id,
+    expectedText: 'Different text',
+    start: 0,
+    end: 3,
+    format: 'italic'
+  }), /changed before formatting/);
+
+  assert.throws(() => applyInlineFormatting(source, {
+    nodeId: node.id,
+    expectedText: node.text,
+    start: 0,
+    end: node.text.length + 10,
+    format: 'underline'
+  }), /range is no longer valid/);
 });
 
 test('editable rendering adds markers without changing the saved source', () => {

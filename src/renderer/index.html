@@ -116,6 +116,37 @@
         </div>
       </div>
 
+      <div id="formatToolbar" class="format-toolbar" aria-label="Text formatting">
+        <span class="format-label">Text</span>
+        <button class="format-button" data-text-format="bold" title="Bold selected text"><strong>B</strong></button>
+        <button class="format-button italic-button" data-text-format="italic" title="Italic selected text">I</button>
+        <button class="format-button underline-button" data-text-format="underline" title="Underline selected text">U</button>
+
+        <select id="formatFontSize" title="Font size for selected text">
+          <option value="">Size</option>
+          <option value="12px">12</option>
+          <option value="14px">14</option>
+          <option value="16px">16</option>
+          <option value="18px">18</option>
+          <option value="20px">20</option>
+          <option value="24px">24</option>
+          <option value="28px">28</option>
+          <option value="32px">32</option>
+        </select>
+
+        <label class="format-color-control" title="Text color">
+          <span>A</span>
+          <input id="formatTextColor" type="color" value="#d32f2f" aria-label="Text color">
+        </label>
+
+        <label class="format-color-control highlight-control" title="Text background color">
+          <span>A</span>
+          <input id="formatBackgroundColor" type="color" value="#fff2a8" aria-label="Text background color">
+        </label>
+
+        <span id="formatSelectionHint" class="format-hint">Select text in one editable block to format it.</span>
+      </div>
+
       <div id="frameHost" class="frame-host">
         <iframe id="pageFrame" title="HTML page editor" sandbox="allow-same-origin"></iframe>
       </div>

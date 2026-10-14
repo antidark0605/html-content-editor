@@ -6,6 +6,7 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { diffLines } from 'diff';
 import {
+  applyInlineFormatting,
   applyTextEdits,
   extractEditableTextNodes
 } from './html-model.mjs';
@@ -145,8 +146,9 @@ function sessionPayload() {
     filePath: session.filePath,
     fileName: path.basename(session.filePath),
     source: session.original,
+    editSource: session.working,
     workingSource: session.working,
-    textNodes: session.textNodes,
+    textNodes: extractEditableTextNodes(session.working),
     baseHref: baseHrefFor(session.filePath),
     dirty: session.dirty,
     hasScripts: /<script\b/i.test(session.original)
@@ -359,7 +361,7 @@ function confirmEditorDiscardOrSave() {
     cancelId: 2,
     title: 'Unsaved changes',
     message: `Save changes to ${path.basename(session.filePath)}?`,
-    detail: 'Your text edits have not been saved yet.'
+    detail: 'Your edits have not been saved yet.'
   });
 
   if (choice === 2) return false;
@@ -685,10 +687,12 @@ ipcMain.handle('compare:save', async (_event, requestedSide) => {
   }
 });
 
-ipcMain.handle('html:apply-edits', async (_event, edits) => {
+ipcMain.handle('html:apply-edits', async (_event, baseSource, edits) => {
   if (!session) throw new Error('No HTML file is open.');
+  if (typeof baseSource !== 'string') throw new Error('Invalid editor source.');
 
-  const working = applyTextEdits(session.original, session.textNodes, edits ?? {});
+  const textNodes = extractEditableTextNodes(baseSource);
+  const working = applyTextEdits(baseSource, textNodes, edits ?? {});
   session.working = working;
   session.dirty = working !== session.original;
 
@@ -696,6 +700,31 @@ ipcMain.handle('html:apply-edits', async (_event, edits) => {
     workingSource: working,
     dirty: session.dirty
   };
+});
+
+ipcMain.handle('html:format-selection', async (_event, request) => {
+  if (!session) {
+    return { ok: false, reason: 'No HTML file is open.' };
+  }
+
+  try {
+    const formatted = applyInlineFormatting(session.working, request ?? {});
+    session.working = formatted;
+    session.dirty = formatted !== session.original;
+
+    return {
+      ok: true,
+      workingSource: formatted,
+      editSource: formatted,
+      textNodes: extractEditableTextNodes(formatted),
+      dirty: session.dirty
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error)
+    };
+  }
 });
 
 ipcMain.handle('file:save', async (_event, workingSource) => {
