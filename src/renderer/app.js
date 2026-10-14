@@ -455,27 +455,39 @@ function updateEditableCount() {
 }
 
 function updateFormatControls() {
-  const ready = Boolean(state.richSelection) &&
+  const editorReady =
     state.workspaceMode === 'editor' &&
     state.mode === 'edit';
+  const selectionReady = editorReady && Boolean(state.richSelection);
+  const caretReady = editorReady && Boolean(state.editorCaret);
+  const colorReady = selectionReady || caretReady;
 
-  elements.formatToolbar.classList.toggle('selection-ready', ready);
+  elements.formatToolbar.classList.toggle('selection-ready', selectionReady);
 
   for (const button of elements.formatButtons) {
-    button.disabled = !ready;
+    button.disabled = !selectionReady;
   }
 
-  elements.formatFontSize.disabled = !ready;
-  elements.formatTextColor.disabled = !ready;
-  elements.formatBackgroundColor.disabled = !ready;
+  elements.formatFontSize.disabled = !selectionReady;
+  elements.textColorButton.disabled = !colorReady;
+  elements.backgroundColorButton.disabled = !colorReady;
 
-  elements.formatSelectionHint.textContent = ready
-    ? `${state.richSelection.end - state.richSelection.start} characters selected`
-    : 'Select text in one editable block to format it.';
+  if (selectionReady) {
+    elements.formatSelectionHint.textContent =
+      `${state.richSelection.end - state.richSelection.start} characters selected`;
+  } else if (caretReady) {
+    elements.formatSelectionHint.textContent =
+      'Caret ready · color applies to new text';
+  } else {
+    elements.formatSelectionHint.textContent =
+      'Select text, or place the caret to choose typing color.';
+  }
 }
 
 function clearRichSelection() {
   state.richSelection = null;
+  state.editorCaret = null;
+  closeColorPalette();
   updateFormatControls();
   updateTableControls();
 }
@@ -667,41 +679,62 @@ async function applyTableOperation(request, confirmation = null) {
 }
 
 
+function editableForRangeNode(node) {
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE
+    ? node.closest?.('[data-hce-id]') ?? null
+    : node.parentElement?.closest?.('[data-hce-id]') ?? null;
+}
+
+function textOffsetWithin(doc, editable, container, offset) {
+  const range = doc.createRange();
+  range.selectNodeContents(editable);
+  range.setEnd(container, offset);
+  return range.toString().length;
+}
+
 function captureRichSelection(doc) {
   const selection = doc.getSelection();
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+  if (!selection || selection.rangeCount === 0) {
     clearRichSelection();
     return;
   }
 
   const range = selection.getRangeAt(0);
-  const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE
-    ? range.startContainer.closest?.('[data-hce-id]')
-    : range.startContainer.parentElement?.closest?.('[data-hce-id]');
-  const endElement = range.endContainer.nodeType === Node.ELEMENT_NODE
-    ? range.endContainer.closest?.('[data-hce-id]')
-    : range.endContainer.parentElement?.closest?.('[data-hce-id]');
+  const startElement = editableForRangeNode(range.startContainer);
+  const endElement = editableForRangeNode(range.endContainer);
 
   if (!startElement || startElement !== endElement) {
     clearRichSelection();
     return;
   }
 
-  const beforeRange = doc.createRange();
-  beforeRange.selectNodeContents(startElement);
-  beforeRange.setEnd(range.startContainer, range.startOffset);
+  const start = textOffsetWithin(
+    doc,
+    startElement,
+    range.startContainer,
+    range.startOffset
+  );
+  const end = textOffsetWithin(
+    doc,
+    startElement,
+    range.endContainer,
+    range.endOffset
+  );
 
-  const selectedRange = doc.createRange();
-  selectedRange.selectNodeContents(startElement);
-  selectedRange.setEnd(range.endContainer, range.endOffset);
+  state.lastEditorNodeId = startElement.dataset.hceId ?? state.lastEditorNodeId;
 
-  const start = beforeRange.toString().length;
-  const end = selectedRange.toString().length;
-  if (end <= start) {
-    clearRichSelection();
+  if (selection.isCollapsed || end <= start) {
+    state.richSelection = null;
+    state.editorCaret = {
+      nodeId: startElement.dataset.hceId,
+      offset: start
+    };
+    updateFormatControls();
     return;
   }
 
+  state.editorCaret = null;
   state.richSelection = {
     nodeId: startElement.dataset.hceId,
     expectedText: startElement.textContent ?? '',
