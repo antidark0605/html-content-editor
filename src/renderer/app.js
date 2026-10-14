@@ -49,6 +49,21 @@ const elements = {
   formatTextColor: document.querySelector('#formatTextColor'),
   formatBackgroundColor: document.querySelector('#formatBackgroundColor'),
   formatSelectionHint: document.querySelector('#formatSelectionHint'),
+  insertTableButton: document.querySelector('#insertTableButton'),
+  tableContextTools: document.querySelector('#tableContextTools'),
+  insertRowAboveButton: document.querySelector('#insertRowAboveButton'),
+  insertRowBelowButton: document.querySelector('#insertRowBelowButton'),
+  deleteRowButton: document.querySelector('#deleteRowButton'),
+  insertColumnLeftButton: document.querySelector('#insertColumnLeftButton'),
+  insertColumnRightButton: document.querySelector('#insertColumnRightButton'),
+  deleteColumnButton: document.querySelector('#deleteColumnButton'),
+  deleteTableButton: document.querySelector('#deleteTableButton'),
+  tableSelectionHint: document.querySelector('#tableSelectionHint'),
+  insertTableDialog: document.querySelector('#insertTableDialog'),
+  insertTableRows: document.querySelector('#insertTableRows'),
+  insertTableColumns: document.querySelector('#insertTableColumns'),
+  cancelInsertTableButton: document.querySelector('#cancelInsertTableButton'),
+  confirmInsertTableButton: document.querySelector('#confirmInsertTableButton'),
   editableCount: document.querySelector('#editableCount'),
   scriptWarning: document.querySelector('#scriptWarning'),
   frameHost: document.querySelector('#frameHost'),
@@ -103,8 +118,11 @@ const state = {
   edits: {},
   editorSource: '',
   editorTextNodes: [],
+  tables: [],
   workingSource: '',
   richSelection: null,
+  tableSelection: null,
+  lastEditorNodeId: null,
   pendingEditorViewportRestore: null,
   mode: 'edit',
   undoStack: [],
@@ -192,6 +210,20 @@ function editorStyle() {
     [data-hce-id].hce-search-hit {
       outline: 2px solid #d97706 !important;
       background: rgba(245, 158, 11, 0.24) !important;
+    }
+    td[data-hce-cell-id],
+    th[data-hce-cell-id] {
+      outline: 1px dashed rgba(31, 111, 235, 0.22) !important;
+      outline-offset: -1px !important;
+    }
+    td[data-hce-cell-id]:hover,
+    th[data-hce-cell-id]:hover {
+      outline-color: rgba(31, 111, 235, 0.55) !important;
+    }
+    td.hce-table-cell-selected,
+    th.hce-table-cell-selected {
+      outline: 2px solid #1f6feb !important;
+      outline-offset: -2px !important;
     }
   </style>`;
 }
