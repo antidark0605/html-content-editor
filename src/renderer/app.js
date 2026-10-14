@@ -609,6 +609,7 @@ async function applyTableOperation(request, confirmation = null) {
   state.editorSource = result.editSource;
   state.editorTextNodes = result.textNodes;
   state.tables = result.tables ?? [];
+  state.lastEditorNodeId = null;
   state.edits = {};
   state.workingSource = result.workingSource;
   setDirty(result.dirty);
@@ -746,6 +747,7 @@ async function applyTextFormat(format, value = null) {
   state.editorSource = result.editSource;
   state.editorTextNodes = result.textNodes;
   state.tables = result.tables ?? state.tables;
+  state.lastEditorNodeId = null;
   state.edits = {};
   state.workingSource = result.workingSource;
   setDirty(result.dirty);
@@ -791,6 +793,14 @@ function wireEditableFrame() {
       const cell = editable.closest('td, th');
       if (cell?.dataset?.hceCellId) {
         selectTableCell(cell);
+      }
+
+      if ((editable.textContent ?? '') === '\u00a0') {
+        const range = doc.createRange();
+        range.selectNodeContents(editable);
+        const selection = doc.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
       }
     });
 
@@ -939,6 +949,7 @@ function renderEdit() {
 function renderPreview() {
   elements.formatToolbar.classList.add('hidden');
   clearRichSelection();
+  clearTableSelection();
   elements.diffHost.classList.add('hidden');
   elements.editorDiffNav.classList.add('hidden');
   elements.frameHost.classList.remove('hidden');
@@ -954,6 +965,7 @@ function renderPreview() {
 async function renderDiff() {
   elements.formatToolbar.classList.add('hidden');
   clearRichSelection();
+  clearTableSelection();
   elements.frameHost.classList.add('hidden');
   elements.diffHost.classList.remove('hidden');
   elements.editorDiffNav.classList.remove('hidden');
