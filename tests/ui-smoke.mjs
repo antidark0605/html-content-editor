@@ -493,18 +493,18 @@ try {
 
   await selectTextRange(
     editorFrame,
-    '[data-hce-id]:has-text("Architecture")',
+    '[data-hce-id]:has-text("HTML")',
     0,
-    12
+    4
   );
   await page.locator('#formatFontSize').selectOption('20px');
   await editorFrame.waitForSelector('span[style*="font-size: 20px"]');
 
   await selectTextRange(
     editorFrame,
-    '[data-hce-id]:has-text("Benchmark")',
+    '[data-hce-id]:has-text("HTML")',
     0,
-    9
+    4
   );
   await page.locator('#formatTextColor').evaluate((element) => {
     element.value = '#d32f2f';
@@ -514,9 +514,9 @@ try {
 
   await selectTextRange(
     editorFrame,
-    '[data-hce-id]:has-text("Notes")',
+    '[data-hce-id]:has-text("HTML")',
     0,
-    5
+    4
   );
   await page.locator('#formatBackgroundColor').evaluate((element) => {
     element.value = '#fff2a8';
@@ -529,11 +529,6 @@ try {
     fullPage: true
   });
 
-  await editTextNode(
-    editorFrame,
-    '[data-hce-id]:has-text("This introduction is the same on both pages.")',
-    'This introduction was edited after formatting.'
-  );
   await editTextNode(
     editorFrame,
     '[data-hce-id]:has-text("TTFA is measured before the first audio frame.")',
@@ -549,7 +544,8 @@ try {
     document.querySelector('#editorModeHint')?.textContent === 'Final render · read-only'
   );
   assert.equal(await editorFrame.locator('[data-hce-id]').count(), 0);
-  assert.ok(await editorFrame.locator('text=This introduction was edited after formatting.').count() > 0);
+  assert.ok(await editorFrame.locator('text=TTFA is now measured before the first audio frame.').count() > 0);
+  assert.ok(await editorFrame.locator('span[style*="font-weight: 700"]').count() > 0);
 
   await page.locator('[data-mode="edit"]').click();
   await page.waitForFunction(() =>
