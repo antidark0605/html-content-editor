@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('hce', {
   saveCompare: (side) => ipcRenderer.invoke('compare:save', side),
   applyEdits: (baseSource, edits) => ipcRenderer.invoke('html:apply-edits', baseSource, edits),
   formatText: (request) => ipcRenderer.invoke('html:format-selection', request),
+  tableOperation: (request) => ipcRenderer.invoke('html:table-operation', request),
   save: (workingSource) => ipcRenderer.invoke('file:save', workingSource),
   saveAs: (workingSource) => ipcRenderer.invoke('file:save-as', workingSource),
   diff: (workingSource) => ipcRenderer.invoke('html:diff', workingSource),
