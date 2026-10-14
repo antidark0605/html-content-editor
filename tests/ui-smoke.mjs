@@ -566,7 +566,7 @@ try {
   assert.equal(await transientTypingSpan.getAttribute('data-hce-color'), '#0070c0');
   assert.equal(await transientTypingSpan.getAttribute('data-hce-background-color'), '#d9eaf7');
 
-  await page.keyboard.type(' COLORED');
+  await editorFrame.locator(caretSelector).pressSequentially(' COLORED');
   assert.equal(
     await transientTypingSpan.textContent(),
     ' COLORED',
