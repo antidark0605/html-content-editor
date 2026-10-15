@@ -84,6 +84,31 @@ async function selectTextRange(frame, selector, start, end) {
   }, { start, end });
 }
 
+async function setCaret(frame, selector, offset = null) {
+  const target = frame.locator(selector).first();
+  await target.waitFor();
+
+  await target.evaluate((element, requestedOffset) => {
+    element.focus();
+
+    const textNode = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE);
+    if (!textNode) throw new Error('Expected a direct text node for caret test.');
+
+    const caretOffset = requestedOffset === null
+      ? textNode.nodeValue.length
+      : requestedOffset;
+
+    const range = document.createRange();
+    range.setStart(textNode, caretOffset);
+    range.collapse(true);
+
+    const selection = document.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }, offset);
+}
+
 function historyCount(text, name) {
   const match = new RegExp(`${name} \\((\\d+)\\)`).exec(text ?? '');
   return match ? Number(match[1]) : 0;
@@ -509,11 +534,19 @@ try {
     0,
     4
   );
-  await page.locator('#formatTextColor').evaluate((element) => {
-    element.value = '#d32f2f';
-    element.dispatchEvent(new Event('change', { bubbles: true }));
+  await page.locator('#textColorButton').click();
+  await page.waitForSelector('#colorPalette:not(.hidden)');
+  assert.equal(await page.locator('#themeColorGrid .color-swatch').count(), 50);
+  assert.equal(await page.locator('#standardColorGrid .color-swatch').count(), 10);
+  assert.equal(await page.locator('#otherColorsButton').isVisible(), true);
+
+  await page.screenshot({
+    path: path.join(outputDir, 'editor-color-palette.png'),
+    fullPage: true
   });
-  await editorFrame.waitForSelector('span[style*="color: #d32f2f"]');
+
+  await page.locator('#colorPalette .color-swatch[data-color="#c00000"]').click();
+  await editorFrame.waitForSelector('span[style*="color: #c00000"]');
 
   await selectTextRange(
     editorFrame,
@@ -521,11 +554,48 @@ try {
     0,
     4
   );
-  await page.locator('#formatBackgroundColor').evaluate((element) => {
-    element.value = '#fff2a8';
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await editorFrame.waitForSelector('span[style*="background-color: #fff2a8"]');
+  await page.locator('#backgroundColorButton').click();
+  await page.waitForSelector('#colorPalette:not(.hidden)');
+  await page.locator('#colorPalette .color-swatch[data-color="#fce4d6"]').click();
+  await editorFrame.waitForSelector('span[style*="background-color: #fce4d6"]');
+
+  // With no selection, a caret color choice styles only newly typed text.
+  const caretSelector = '[data-hce-id]:has-text("RTF is lower when precomputed voices are used.")';
+  await setCaret(editorFrame, caretSelector);
+
+  await page.waitForFunction(() =>
+    document.querySelector('#formatSelectionHint')?.textContent?.includes('Caret ready')
+  );
+
+  await page.locator('#textColorButton').click();
+  await page.locator('#colorPalette .color-swatch[data-color="#0070c0"]').click();
+
+  await page.locator('#backgroundColorButton').click();
+  await page.locator('#colorPalette .color-swatch[data-color="#d9eaf7"]').first().click();
+
+  await editorFrame.locator(caretSelector).pressSequentially(' COLORED');
+
+  const transientTypingSpan = editorFrame.locator('[data-hce-typing-style]').last();
+  await transientTypingSpan.waitFor({ state: 'attached' });
+  assert.equal(await transientTypingSpan.getAttribute('data-hce-color'), '#0070c0');
+  assert.equal(await transientTypingSpan.getAttribute('data-hce-background-color'), '#d9eaf7');
+  assert.equal(
+    await transientTypingSpan.textContent(),
+    ' COLORED',
+    'Expected keyboard input to be inserted with the active caret colors'
+  );
+
+  await page.locator('#fileName').click();
+
+  await editorFrame.waitForSelector(
+    'span[style*="color: #0070c0"][style*="background-color: #d9eaf7"]'
+  );
+  assert.equal(
+    await editorFrame.locator(
+      'span[style*="color: #0070c0"][style*="background-color: #d9eaf7"]'
+    ).last().textContent(),
+    ' COLORED'
+  );
 
   await page.screenshot({
     path: path.join(outputDir, 'editor-formatting.png'),

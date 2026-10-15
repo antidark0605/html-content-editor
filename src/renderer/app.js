@@ -46,8 +46,17 @@ const elements = {
   formatToolbar: document.querySelector('#formatToolbar'),
   formatButtons: [...document.querySelectorAll('[data-text-format]')],
   formatFontSize: document.querySelector('#formatFontSize'),
-  formatTextColor: document.querySelector('#formatTextColor'),
-  formatBackgroundColor: document.querySelector('#formatBackgroundColor'),
+  textColorButton: document.querySelector('#textColorButton'),
+  backgroundColorButton: document.querySelector('#backgroundColorButton'),
+  textColorPreview: document.querySelector('#textColorPreview'),
+  backgroundColorPreview: document.querySelector('#backgroundColorPreview'),
+  colorPalette: document.querySelector('#colorPalette'),
+  colorPaletteTitle: document.querySelector('#colorPaletteTitle'),
+  colorPaletteModeHint: document.querySelector('#colorPaletteModeHint'),
+  themeColorGrid: document.querySelector('#themeColorGrid'),
+  standardColorGrid: document.querySelector('#standardColorGrid'),
+  otherColorsButton: document.querySelector('#otherColorsButton'),
+  otherColorsInput: document.querySelector('#otherColorsInput'),
   formatSelectionHint: document.querySelector('#formatSelectionHint'),
   insertTableButton: document.querySelector('#insertTableButton'),
   tableContextTools: document.querySelector('#tableContextTools'),
@@ -121,6 +130,12 @@ const state = {
   tables: [],
   workingSource: '',
   richSelection: null,
+  editorCaret: null,
+  caretTypingStyle: null,
+  compositionState: null,
+  colorPaletteTarget: null,
+  currentTextColor: '#d32f2f',
+  currentBackgroundColor: '#fff2a8',
   tableSelection: null,
   lastEditorNodeId: null,
   pendingEditorViewportRestore: null,
@@ -151,6 +166,32 @@ const state = {
   visualCenterGeneration: 0,
   appInfo: null
 };
+
+const THEME_COLOR_COLUMNS = [
+  ['#ffffff', '#f2f2f2', '#d9d9d9', '#bfbfbf', '#7f7f7f'],
+  ['#000000', '#7f7f7f', '#595959', '#3f3f3f', '#1f1f1f'],
+  ['#e7e6e6', '#d0cece', '#aeaaaa', '#757171', '#3f3f3f'],
+  ['#17365d', '#d9eaf7', '#9dc3e6', '#5b9bd5', '#1f4e79'],
+  ['#1f4e78', '#d9e2f3', '#9dc3e6', '#2e75b6', '#1f4e78'],
+  ['#ed7d31', '#fce4d6', '#f8cbad', '#c65911', '#833c0c'],
+  ['#70ad47', '#e2f0d9', '#c6e0b4', '#70ad47', '#375623'],
+  ['#00b0f0', '#d9eaf7', '#9ddcf9', '#00b0f0', '#006b8f'],
+  ['#a64ca6', '#eadcf8', '#d8b4e2', '#a64ca6', '#703070'],
+  ['#4ea72e', '#e2f0d9', '#a9d18e', '#70ad47', '#2f641c']
+];
+
+const STANDARD_COLORS = [
+  '#c00000',
+  '#ff0000',
+  '#ffc000',
+  '#ffff00',
+  '#92d050',
+  '#00b050',
+  '#00b0f0',
+  '#0070c0',
+  '#002060',
+  '#7030a0'
+];
 
 function escapeHtmlText(value) {
   return value
@@ -389,6 +430,99 @@ async function recordEdit(id, value, beforeOverride = null) {
   updateHistoryButtons();
 }
 
+function styledSegmentsFromEditable(editable) {
+  const segments = [];
+
+  const pushSegment = (text, style = null) => {
+    if (!text) return;
+
+    const previous = segments.at(-1);
+    const sameStyle = JSON.stringify(previous?.style ?? null) === JSON.stringify(style);
+
+    if (previous && sameStyle) {
+      previous.text += text;
+      return;
+    }
+
+    segments.push({ text, ...(style ? { style } : {}) });
+  };
+
+  const visit = (node, inheritedStyle = null) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      pushSegment(node.nodeValue ?? '', inheritedStyle);
+      return;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    let style = inheritedStyle ? { ...inheritedStyle } : null;
+
+    if (node.matches?.('[data-hce-typing-style]')) {
+      style = style ?? {};
+
+      if (node.dataset.hceColor) {
+        style.color = node.dataset.hceColor;
+      }
+
+      if (node.dataset.hceBackgroundColor) {
+        style.backgroundColor = node.dataset.hceBackgroundColor;
+      }
+    }
+
+    const normalizedStyle = style && Object.keys(style).length > 0 ? style : null;
+
+    for (const child of node.childNodes) {
+      visit(child, normalizedStyle);
+    }
+  };
+
+  for (const child of editable.childNodes) {
+    visit(child);
+  }
+
+  return segments;
+}
+function hasCommittedTypingStyle(editable) {
+  return [...editable.querySelectorAll('[data-hce-typing-style]')]
+    .some((node) => (node.textContent ?? '').length > 0);
+}
+
+async function commitStyledEditableElement(editable) {
+  const id = editable.dataset.hceId;
+  const viewport = captureEditorViewport();
+  const before = snapshotEditorState();
+  const segments = styledSegmentsFromEditable(editable);
+
+  const result = await window.hce.commitStyledText({
+    nodeId: id,
+    segments
+  });
+
+  if (!result.ok) {
+    showToast(result.reason);
+    return false;
+  }
+
+  state.editorSource = result.editSource;
+  state.editorTextNodes = result.textNodes;
+  state.tables = result.tables ?? state.tables;
+  state.edits = {};
+  state.workingSource = result.workingSource;
+  state.lastEditorNodeId = null;
+  setDirty(result.dirty);
+  updateEditableCount();
+  clearRichSelection();
+
+  const after = snapshotEditorState();
+  state.undoStack.push({ type: 'snapshot', before, after });
+  state.redoStack.length = 0;
+  updateHistoryButtons();
+
+  state.pendingEditorViewportRestore = viewport;
+  renderEdit();
+  return true;
+}
+
 function removeEmptySpanWrapper(editable, node) {
   let wrapper = editable;
   const depth = Number.isInteger(node?.emptySpanDepth) ? node.emptySpanDepth : 0;
@@ -406,6 +540,15 @@ function removeEmptySpanWrapper(editable, node) {
 
 async function commitEditableElement(editable) {
   if (!editable?.matches?.('[data-hce-id]')) return;
+
+  for (const emptySpan of editable.querySelectorAll('[data-hce-typing-style]:empty')) {
+    emptySpan.remove();
+  }
+
+  if (hasCommittedTypingStyle(editable)) {
+    await commitStyledEditableElement(editable);
+    return;
+  }
 
   const id = editable.dataset.hceId;
   const node = nodeById(id);
@@ -449,27 +592,41 @@ function updateEditableCount() {
 }
 
 function updateFormatControls() {
-  const ready = Boolean(state.richSelection) &&
+  const editorReady =
     state.workspaceMode === 'editor' &&
     state.mode === 'edit';
+  const selectionReady = editorReady && Boolean(state.richSelection);
+  const caretReady = editorReady && Boolean(state.editorCaret);
+  const colorReady = selectionReady || caretReady;
 
-  elements.formatToolbar.classList.toggle('selection-ready', ready);
+  elements.formatToolbar.classList.toggle('selection-ready', selectionReady);
 
   for (const button of elements.formatButtons) {
-    button.disabled = !ready;
+    button.disabled = !selectionReady;
   }
 
-  elements.formatFontSize.disabled = !ready;
-  elements.formatTextColor.disabled = !ready;
-  elements.formatBackgroundColor.disabled = !ready;
+  elements.formatFontSize.disabled = !selectionReady;
+  elements.textColorButton.disabled = !colorReady;
+  elements.backgroundColorButton.disabled = !colorReady;
 
-  elements.formatSelectionHint.textContent = ready
-    ? `${state.richSelection.end - state.richSelection.start} characters selected`
-    : 'Select text in one editable block to format it.';
+  if (selectionReady) {
+    elements.formatSelectionHint.textContent =
+      `${state.richSelection.end - state.richSelection.start} characters selected`;
+  } else if (caretReady) {
+    elements.formatSelectionHint.textContent =
+      'Caret ready · color applies to new text';
+  } else {
+    elements.formatSelectionHint.textContent =
+      'Select text, or place the caret to choose typing color.';
+  }
 }
 
 function clearRichSelection() {
   state.richSelection = null;
+  state.editorCaret = null;
+  state.caretTypingStyle = null;
+  state.compositionState = null;
+  closeColorPalette();
   updateFormatControls();
   updateTableControls();
 }
@@ -661,41 +818,72 @@ async function applyTableOperation(request, confirmation = null) {
 }
 
 
+function editableForRangeNode(node) {
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE
+    ? node.closest?.('[data-hce-id]') ?? null
+    : node.parentElement?.closest?.('[data-hce-id]') ?? null;
+}
+
+function textOffsetWithin(doc, editable, container, offset) {
+  const range = doc.createRange();
+  range.selectNodeContents(editable);
+  range.setEnd(container, offset);
+  return range.toString().length;
+}
+
 function captureRichSelection(doc) {
   const selection = doc.getSelection();
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+  if (!selection || selection.rangeCount === 0) {
     clearRichSelection();
     return;
   }
 
   const range = selection.getRangeAt(0);
-  const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE
-    ? range.startContainer.closest?.('[data-hce-id]')
-    : range.startContainer.parentElement?.closest?.('[data-hce-id]');
-  const endElement = range.endContainer.nodeType === Node.ELEMENT_NODE
-    ? range.endContainer.closest?.('[data-hce-id]')
-    : range.endContainer.parentElement?.closest?.('[data-hce-id]');
+  const startElement = editableForRangeNode(range.startContainer);
+  const endElement = editableForRangeNode(range.endContainer);
 
   if (!startElement || startElement !== endElement) {
     clearRichSelection();
     return;
   }
 
-  const beforeRange = doc.createRange();
-  beforeRange.selectNodeContents(startElement);
-  beforeRange.setEnd(range.startContainer, range.startOffset);
+  const start = textOffsetWithin(
+    doc,
+    startElement,
+    range.startContainer,
+    range.startOffset
+  );
+  const end = textOffsetWithin(
+    doc,
+    startElement,
+    range.endContainer,
+    range.endOffset
+  );
 
-  const selectedRange = doc.createRange();
-  selectedRange.selectNodeContents(startElement);
-  selectedRange.setEnd(range.endContainer, range.endOffset);
+  state.lastEditorNodeId = startElement.dataset.hceId ?? state.lastEditorNodeId;
 
-  const start = beforeRange.toString().length;
-  const end = selectedRange.toString().length;
-  if (end <= start) {
-    clearRichSelection();
+  if (selection.isCollapsed || end <= start) {
+    const nodeId = startElement.dataset.hceId;
+
+    state.richSelection = null;
+    state.editorCaret = {
+      nodeId,
+      offset: start
+    };
+
+    if (state.caretTypingStyle?.nodeId !== nodeId) {
+      state.caretTypingStyle = null;
+      state.compositionState = null;
+    }
+
+    updateFormatControls();
     return;
   }
 
+  state.editorCaret = null;
+  state.caretTypingStyle = null;
+  state.compositionState = null;
   state.richSelection = {
     nodeId: startElement.dataset.hceId,
     expectedText: startElement.textContent ?? '',
@@ -703,6 +891,369 @@ function captureRichSelection(doc) {
     end
   };
   updateFormatControls();
+}
+
+
+function colorValueForTarget(target) {
+  return target === 'background'
+    ? state.currentBackgroundColor
+    : state.currentTextColor;
+}
+
+function setColorPreview(target, color) {
+  if (target === 'background') {
+    state.currentBackgroundColor = color;
+    elements.backgroundColorPreview.style.setProperty('--preview-color', color);
+    elements.backgroundColorButton.style.setProperty('--highlight-preview', color);
+    return;
+  }
+
+  state.currentTextColor = color;
+  elements.textColorPreview.style.setProperty('--preview-color', color);
+}
+
+function closeColorPalette() {
+  if (!elements.colorPalette) return;
+
+  elements.colorPalette.classList.add('hidden');
+  elements.textColorButton?.setAttribute('aria-expanded', 'false');
+  elements.backgroundColorButton?.setAttribute('aria-expanded', 'false');
+  state.colorPaletteTarget = null;
+}
+
+function updatePaletteSelection() {
+  const activeColor = colorValueForTarget(state.colorPaletteTarget);
+
+  for (const swatch of elements.colorPalette.querySelectorAll('.color-swatch')) {
+    swatch.classList.toggle(
+      'selected',
+      swatch.dataset.color?.toLowerCase() === activeColor?.toLowerCase()
+    );
+  }
+}
+
+function openColorPalette(target) {
+  const button = target === 'background'
+    ? elements.backgroundColorButton
+    : elements.textColorButton;
+
+  if (!button || button.disabled) return;
+
+  if (
+    state.colorPaletteTarget === target &&
+    !elements.colorPalette.classList.contains('hidden')
+  ) {
+    closeColorPalette();
+    return;
+  }
+
+  state.colorPaletteTarget = target;
+  elements.colorPaletteTitle.textContent =
+    target === 'background' ? 'Text background color' : 'Text color';
+  elements.colorPaletteModeHint.textContent = state.richSelection
+    ? 'Apply to selected text'
+    : 'Use for newly typed text';
+
+  const toolbarRect = elements.formatToolbar.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  const paletteWidth = 342;
+  const relativeLeft = buttonRect.left - toolbarRect.left;
+  const maxLeft = Math.max(8, toolbarRect.width - paletteWidth - 8);
+  const left = Math.max(8, Math.min(relativeLeft, maxLeft));
+
+  elements.colorPalette.style.left = `${left}px`;
+  elements.otherColorsInput.value = colorValueForTarget(target);
+  elements.colorPalette.classList.remove('hidden');
+  button.setAttribute('aria-expanded', 'true');
+
+  const otherButton = target === 'background'
+    ? elements.textColorButton
+    : elements.backgroundColorButton;
+  otherButton.setAttribute('aria-expanded', 'false');
+
+  updatePaletteSelection();
+}
+
+function createColorSwatch(color, label) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'color-swatch';
+  button.dataset.color = color;
+  button.title = label ?? color;
+  button.setAttribute('aria-label', label ?? color);
+  button.style.setProperty('--swatch-color', color);
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('click', () => void applyPaletteColor(color));
+  return button;
+}
+
+function buildColorPalette() {
+  elements.themeColorGrid.replaceChildren();
+
+  for (let shadeIndex = 0; shadeIndex < 5; shadeIndex += 1) {
+    for (const column of THEME_COLOR_COLUMNS) {
+      const color = column[shadeIndex];
+      elements.themeColorGrid.append(
+        createColorSwatch(color, `Theme color ${color}`)
+      );
+    }
+  }
+
+  elements.standardColorGrid.replaceChildren();
+  for (const color of STANDARD_COLORS) {
+    elements.standardColorGrid.append(
+      createColorSwatch(color, `Standard color ${color}`)
+    );
+  }
+
+  setColorPreview('text', state.currentTextColor);
+  setColorPreview('background', state.currentBackgroundColor);
+}
+
+function caretPointAtTextOffset(doc, editable, offset) {
+  const walker = doc.createTreeWalker(
+    editable,
+    doc.defaultView.NodeFilter.SHOW_TEXT
+  );
+
+  let remaining = Math.max(0, offset);
+  let node = walker.nextNode();
+
+  while (node) {
+    const length = node.nodeValue?.length ?? 0;
+    if (remaining <= length) {
+      return { node, offset: remaining };
+    }
+    remaining -= length;
+    node = walker.nextNode();
+  }
+
+  return { node: editable, offset: editable.childNodes.length };
+}
+
+function currentCaretRange(doc, editable, fallbackOffset) {
+  const selection = doc.getSelection();
+
+  if (selection?.rangeCount) {
+    const range = selection.getRangeAt(0);
+    const activeEditable = editableForRangeNode(range.startContainer);
+
+    if (
+      selection.isCollapsed &&
+      activeEditable === editable
+    ) {
+      return range;
+    }
+  }
+
+  const point = caretPointAtTextOffset(doc, editable, fallbackOffset);
+  const range = doc.createRange();
+  range.setStart(point.node, point.offset);
+  range.collapse(true);
+  return range;
+}
+
+function transientTypingSpanForRange(range) {
+  const container = range.startContainer;
+  const element = container.nodeType === Node.ELEMENT_NODE
+    ? container
+    : container.parentElement;
+
+  return element?.closest?.('[data-hce-typing-style]') ?? null;
+}
+
+function setCaretInsideTypingSpan(doc, span) {
+  const range = doc.createRange();
+  range.selectNodeContents(span);
+  range.collapse(false);
+
+  const selection = doc.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function typingStyleForEditable(editable) {
+  const style = state.caretTypingStyle;
+  if (!style || style.nodeId !== editable?.dataset?.hceId) return null;
+
+  const normalized = {};
+  if (style.color) normalized.color = style.color;
+  if (style.backgroundColor) normalized.backgroundColor = style.backgroundColor;
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function applyTypingStyleToSpan(span, style) {
+  span.dataset.hceTypingStyle = 'true';
+
+  if (style.color) {
+    span.dataset.hceColor = style.color;
+    span.style.color = style.color;
+  }
+
+  if (style.backgroundColor) {
+    span.dataset.hceBackgroundColor = style.backgroundColor;
+    span.style.backgroundColor = style.backgroundColor;
+  }
+}
+
+function typingSpanMatchesStyle(span, style) {
+  if (!span || !style) return false;
+
+  return (
+    (span.dataset.hceColor ?? null) === (style.color ?? null) &&
+    (span.dataset.hceBackgroundColor ?? null) === (style.backgroundColor ?? null)
+  );
+}
+
+function updateCaretStateFromSelection(doc, editable) {
+  const selection = doc.getSelection();
+  if (!selection?.rangeCount) return;
+
+  const range = selection.getRangeAt(0);
+  if (!selection.isCollapsed || editableForRangeNode(range.startContainer) !== editable) return;
+
+  state.editorCaret = {
+    nodeId: editable.dataset.hceId,
+    offset: textOffsetWithin(
+      doc,
+      editable,
+      range.startContainer,
+      range.startOffset
+    )
+  };
+}
+
+function insertStyledTextAtSelection(doc, editable, text) {
+  const style = typingStyleForEditable(editable);
+  if (!style || typeof text !== 'string' || text.length === 0) return false;
+
+  const selection = doc.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return false;
+
+  let range = selection.getRangeAt(0);
+  if (editableForRangeNode(range.startContainer) !== editable) return false;
+
+  let typingSpan = transientTypingSpanForRange(range);
+
+  if (!typingSpan || !typingSpanMatchesStyle(typingSpan, style)) {
+    typingSpan = doc.createElement('span');
+    applyTypingStyleToSpan(typingSpan, style);
+    range.insertNode(typingSpan);
+
+    range = doc.createRange();
+    range.selectNodeContents(typingSpan);
+    range.collapse(false);
+  }
+
+  const textNode = doc.createTextNode(text);
+  range.insertNode(textNode);
+
+  const nextRange = doc.createRange();
+  nextRange.setStartAfter(textNode);
+  nextRange.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+
+  updateCaretStateFromSelection(doc, editable);
+  return true;
+}
+
+function textBoundaryAtOffset(doc, editable, offset) {
+  const point = caretPointAtTextOffset(doc, editable, offset);
+  return point;
+}
+
+function wrapTextOffsetsWithTypingStyle(doc, editable, start, end, style) {
+  if (!style || end <= start) return false;
+
+  const startPoint = textBoundaryAtOffset(doc, editable, start);
+  const endPoint = textBoundaryAtOffset(doc, editable, end);
+  const range = doc.createRange();
+  range.setStart(startPoint.node, startPoint.offset);
+  range.setEnd(endPoint.node, endPoint.offset);
+
+  const contents = range.extractContents();
+  const span = doc.createElement('span');
+  applyTypingStyleToSpan(span, style);
+  span.append(contents);
+  range.insertNode(span);
+
+  setCaretInsideTypingSpan(doc, span);
+  updateCaretStateFromSelection(doc, editable);
+  return true;
+}
+
+
+function activateCaretColor(target, color) {
+  if (!state.editorCaret || state.mode !== 'edit') return false;
+
+  const doc = elements.pageFrame.contentDocument;
+  const editable = doc?.querySelector(
+    `[data-hce-id="${state.editorCaret.nodeId}"]`
+  );
+
+  if (!doc || !editable) return false;
+
+  const range = currentCaretRange(
+    doc,
+    editable,
+    state.editorCaret.offset
+  );
+
+  const style = state.caretTypingStyle?.nodeId === editable.dataset.hceId
+    ? { ...state.caretTypingStyle }
+    : { nodeId: editable.dataset.hceId };
+
+  if (target === 'background') {
+    style.backgroundColor = color;
+  } else {
+    style.color = color;
+  }
+
+  state.caretTypingStyle = style;
+
+  elements.pageFrame.contentWindow?.focus();
+  editable.focus({ preventScroll: true });
+
+  const selection = doc.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  state.richSelection = null;
+  state.editorCaret = {
+    nodeId: editable.dataset.hceId,
+    offset: textOffsetWithin(
+      doc,
+      editable,
+      range.startContainer,
+      range.startOffset
+    )
+  };
+  updateFormatControls();
+  return true;
+}
+async function applyPaletteColor(color) {
+  const target = state.colorPaletteTarget;
+  if (!target) return;
+
+  setColorPreview(target, color);
+
+  if (state.richSelection) {
+    const format = target === 'background' ? 'backgroundColor' : 'color';
+    closeColorPalette();
+    await applyTextFormat(format, color);
+    return;
+  }
+
+  if (state.editorCaret) {
+    const applied = activateCaretColor(target, color);
+    closeColorPalette();
+
+    if (!applied) {
+      showToast('Place the caret inside editable text first.');
+    }
+  }
 }
 
 function captureEditorViewport() {
@@ -840,6 +1391,8 @@ function wireEditableFrame() {
     editable.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         editable.textContent = editable.dataset.hceBefore ?? editable.textContent;
+        state.caretTypingStyle = null;
+        state.compositionState = null;
         editable.blur();
       }
 
@@ -849,8 +1402,109 @@ function wireEditableFrame() {
       }
     });
 
+    editable.addEventListener('beforeinput', (event) => {
+      if (
+        event.inputType !== 'insertText' ||
+        event.isComposing ||
+        typeof event.data !== 'string' ||
+        !typingStyleForEditable(editable)
+      ) {
+        return;
+      }
+
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+
+      if (
+        !selection?.isCollapsed ||
+        !range ||
+        editableForRangeNode(range.startContainer) !== editable
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      insertStyledTextAtSelection(doc, editable, event.data);
+    });
+
+    editable.addEventListener('paste', (event) => {
+      if (!typingStyleForEditable(editable)) return;
+
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+
+      if (
+        !text ||
+        !selection?.isCollapsed ||
+        !range ||
+        editableForRangeNode(range.startContainer) !== editable
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      insertStyledTextAtSelection(doc, editable, text);
+    });
+
+    editable.addEventListener('compositionstart', () => {
+      const style = typingStyleForEditable(editable);
+      const selection = doc.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+
+      if (
+        !style ||
+        !selection?.isCollapsed ||
+        !range ||
+        editableForRangeNode(range.startContainer) !== editable
+      ) {
+        state.compositionState = null;
+        return;
+      }
+
+      state.compositionState = {
+        nodeId: editable.dataset.hceId,
+        start: textOffsetWithin(
+          doc,
+          editable,
+          range.startContainer,
+          range.startOffset
+        ),
+        style: { ...style }
+      };
+    });
+
+    editable.addEventListener('compositionend', (event) => {
+      const composition = state.compositionState;
+      state.compositionState = null;
+
+      if (
+        !composition ||
+        composition.nodeId !== editable.dataset.hceId ||
+        typeof event.data !== 'string' ||
+        event.data.length === 0
+      ) {
+        return;
+      }
+
+      wrapTextOffsetsWithTypingStyle(
+        doc,
+        editable,
+        composition.start,
+        composition.start + event.data.length,
+        composition.style
+      );
+    });
+
     editable.addEventListener('blur', () => {
-      void queueEditableCommit(editable);
+      void queueEditableCommit(editable).finally(() => {
+        if (state.caretTypingStyle?.nodeId === editable.dataset.hceId) {
+          state.caretTypingStyle = null;
+          state.editorCaret = null;
+          state.compositionState = null;
+          updateFormatControls();
+        }
+      });
     });
   }
 
@@ -2184,7 +2838,9 @@ function loadSession(session) {
   state.tables = session.tables ?? [];
   state.workingSource = session.workingSource ?? session.source;
   state.richSelection = null;
+  state.editorCaret = null;
   state.tableSelection = null;
+  closeColorPalette();
   state.lastEditorNodeId = null;
   state.pendingEditorViewportRestore = null;
   state.undoStack = [];
@@ -2411,12 +3067,38 @@ elements.formatFontSize.addEventListener('change', () => {
   elements.formatFontSize.value = '';
 });
 
-elements.formatTextColor.addEventListener('change', () => {
-  void applyTextFormat('color', elements.formatTextColor.value);
+for (const [button, target] of [
+  [elements.textColorButton, 'text'],
+  [elements.backgroundColorButton, 'background']
+]) {
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('click', () => openColorPalette(target));
+}
+
+elements.colorPalette.addEventListener('mousedown', (event) => {
+  event.preventDefault();
 });
 
-elements.formatBackgroundColor.addEventListener('change', () => {
-  void applyTextFormat('backgroundColor', elements.formatBackgroundColor.value);
+elements.otherColorsButton.addEventListener('click', () => {
+  elements.otherColorsInput.value = colorValueForTarget(state.colorPaletteTarget);
+  elements.otherColorsInput.click();
+});
+
+elements.otherColorsInput.addEventListener('change', () => {
+  void applyPaletteColor(elements.otherColorsInput.value);
+});
+
+document.addEventListener('mousedown', (event) => {
+  if (elements.colorPalette.classList.contains('hidden')) return;
+
+  const insidePalette = elements.colorPalette.contains(event.target);
+  const onColorButton =
+    elements.textColorButton.contains(event.target) ||
+    elements.backgroundColorButton.contains(event.target);
+
+  if (!insidePalette && !onColorButton) {
+    closeColorPalette();
+  }
 });
 
 elements.insertTableButton.addEventListener('click', showInsertTableDialog);
@@ -2569,6 +3251,12 @@ document.addEventListener('drop', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !elements.colorPalette.classList.contains('hidden')) {
+    event.preventDefault();
+    closeColorPalette();
+    return;
+  }
+
   const modifier = event.ctrlKey || event.metaKey;
 
   if (state.workspaceMode === 'editor' && state.mode === 'diff' && modifier && event.altKey && event.key === 'ArrowDown') {
@@ -2663,6 +3351,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+buildColorPalette();
 renderCompareSide('left');
 renderCompareSide('right');
 setCompareZoom(1);

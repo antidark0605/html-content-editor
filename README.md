@@ -74,9 +74,17 @@ In **Edit** mode, select text inside one editable text block and use the formatt
 - text color
 - text background color
 
-Formatting is intentionally constrained rather than acting like a general-purpose word processor. A formatting operation inserts a small inline `<span style="...">` only around the selected text. The surrounding HTML is left untouched, and formatting changes participate in the same Editor Undo/Redo history as normal text edits.
+Text and background color use a Word-like palette with familiar theme shades, standard colors, and an **Other colors…** fallback for the full native color picker. The current color is visible directly on the toolbar button instead of being hidden behind a tiny color input.
 
-The first formatting version requires the selection to stay inside one editable text node. A selection that crosses existing HTML element boundaries is not formatted automatically because doing so could restructure the original markup.
+Color behavior follows normal document-editor expectations:
+
+- with text selected, choosing a color applies immediately to that selection
+- with no selection but a caret inside editable text, choosing a color sets the style for newly typed text from that caret position
+- leaving the editable text block commits the typed styled text back to the HTML source
+
+Formatting remains intentionally constrained rather than acting like a general-purpose word processor. A formatting operation inserts a small controlled inline `<span style="...">` around only the affected text. The surrounding HTML is left untouched, and formatting changes participate in the same Editor Undo/Redo history as normal text edits.
+
+Selection-based formatting still requires the selection to stay inside one editable text node. A selection that crosses existing HTML element boundaries is not formatted automatically because doing so could restructure the original markup.
 
 Visual Compare continues to compare visible text content. Formatting-only HTML differences are visible in **Source Compare**.
 
