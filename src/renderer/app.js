@@ -319,10 +319,22 @@ function buildEditableDocument() {
   let cursor = 0;
 
   for (const node of textNodes) {
+    const edited = Object.hasOwn(state.edits, node.id);
+    const editedValue = edited ? state.edits[node.id] : null;
+    const removeSpan = editedValue === '' &&
+      Number.isInteger(node.emptySpanRange?.start) &&
+      Number.isInteger(node.emptySpanRange?.end);
+
+    if (removeSpan) {
+      parts.push(source.slice(cursor, node.emptySpanRange.start));
+      cursor = node.emptySpanRange.end;
+      continue;
+    }
+
     parts.push(source.slice(cursor, node.start));
 
-    const content = Object.hasOwn(state.edits, node.id)
-      ? escapeHtmlText(state.edits[node.id])
+    const content = edited
+      ? escapeHtmlText(editedValue)
       : source.slice(node.start, node.end);
 
     parts.push(
@@ -511,6 +523,21 @@ async function commitStyledEditableElement(editable) {
   return true;
 }
 
+function removeEmptySpanWrapper(editable, node) {
+  let wrapper = editable;
+  const depth = Number.isInteger(node?.emptySpanDepth) ? node.emptySpanDepth : 0;
+
+  for (let index = 0; index < depth; index += 1) {
+    const parent = wrapper.parentElement;
+    if (!parent || parent.tagName !== 'SPAN' || parent.hasAttribute('data-hce-id')) {
+      return;
+    }
+    wrapper = parent;
+  }
+
+  if (wrapper !== editable) wrapper.remove();
+}
+
 async function commitEditableElement(editable) {
   if (!editable?.matches?.('[data-hce-id]')) return;
 
@@ -524,12 +551,18 @@ async function commitEditableElement(editable) {
   }
 
   const id = editable.dataset.hceId;
+  const node = nodeById(id);
   const before = editable.dataset.hceBefore ?? currentValueFor(id);
   const after = editable.textContent ?? before;
 
   if (after !== before) {
     await recordEdit(id, after, before);
     editable.dataset.hceBefore = after;
+
+    if (after === '' && node?.emptySpanDepth > 0) {
+      if (state.lastEditorNodeId === id) state.lastEditorNodeId = null;
+      removeEmptySpanWrapper(editable, node);
+    }
   }
 }
 
