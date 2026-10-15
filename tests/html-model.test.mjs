@@ -140,8 +140,29 @@ test('removes a sole span wrapper when all of its text is deleted', () => {
   });
 
   assert.equal(updated, '<p>Before  after</p>');
-  assert.equal(rendered, '<p>Before  after</p>');
   assert.doesNotMatch(updated, /class="boxed"/);
+  assert.doesNotMatch(rendered, /class="boxed"/);
+  assert.match(rendered, /data-hce-id="text-1"/);
+  assert.match(rendered, /data-hce-id="text-3"/);
+  assert.doesNotMatch(rendered, /data-hce-id="text-2"/);
+});
+
+test('removes directly nested span-only wrappers without touching neighbors', () => {
+  const source = '<p><b>Keep</b><span class="outer"><span class="inner">Remove</span></span><i>Stay</i></p>';
+  const nodes = extractEditableTextNodes(source);
+  const target = nodes.find((node) => node.text === 'Remove');
+
+  assert.equal(target.emptySpanDepth, 2);
+  const updated = applyTextEdits(source, nodes, { [target.id]: '' });
+  assert.equal(updated, '<p><b>Keep</b><i>Stay</i></p>');
+});
+
+test('preserves the span wrapper when changing text to nonempty text', () => {
+  const source = '<span style="border:1px solid red">Hello</span>';
+  const nodes = extractEditableTextNodes(source);
+  const updated = applyTextEdits(source, nodes, { [nodes[0].id]: 'Again' });
+
+  assert.equal(updated, '<span style="border:1px solid red">Again</span>');
 });
 
 test('keeps a span wrapper when it still contains other content', () => {
