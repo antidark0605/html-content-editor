@@ -261,12 +261,13 @@ main {
 .workspace {
   height: 100%;
   display: grid;
-  grid-template-rows: 38px auto 1fr;
+  grid-template-rows: 38px auto minmax(0, 1fr);
   min-height: 0;
   background: #dfe4ea;
 }
 
 .status-bar {
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -328,6 +329,7 @@ main {
 }
 
 .format-toolbar {
+  grid-row: 2;
   position: relative;
   min-height: 42px;
   display: flex;
@@ -621,6 +623,7 @@ main {
 }
 
 .frame-host {
+  grid-row: 3;
   min-height: 0;
   padding: 12px;
 }
@@ -636,6 +639,7 @@ main {
 }
 
 .editor-diff-host {
+  grid-row: 3;
   position: relative;
   min-height: 0;
   padding: 12px 16px 12px 12px;

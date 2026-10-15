@@ -5,6 +5,9 @@ import path from 'node:path';
 import { _electron as electron } from 'playwright';
 
 const root = process.cwd();
+const { version: expectedVersion } = JSON.parse(
+  await fs.readFile(path.join(root, 'package.json'), 'utf8')
+);
 const outputDir = path.join(root, 'test-results');
 await fs.mkdir(outputDir, { recursive: true });
 
@@ -156,14 +159,14 @@ async function dropFile(page, filePath, target) {
 try {
   const page = await electronApp.firstWindow();
 
-  await page.waitForFunction(() =>
-    document.querySelector('#appVersion')?.textContent === 'v0.9.0'
+  await page.waitForFunction((version) =>
+    document.querySelector('#appVersion')?.textContent === `v${version}`, expectedVersion
   );
-  assert.equal(await page.locator('#appVersion').textContent(), 'v0.9.0');
+  assert.equal(await page.locator('#appVersion').textContent(), `v${expectedVersion}`);
 
   await page.locator('#aboutButton').click();
   await page.waitForSelector('#aboutDialog[open]');
-  assert.equal(await page.locator('#aboutVersion').textContent(), 'Version 0.9.0');
+  assert.equal(await page.locator('#aboutVersion').textContent(), `Version ${expectedVersion}`);
   assert.match(await page.locator('#aboutBuild').textContent() ?? '', /^Build (development|[0-9a-f]{8})$/);
   assert.ok((await page.locator('#aboutElectron').textContent())?.length > 0);
   assert.ok((await page.locator('#aboutPlatform').textContent())?.includes('win32'));
@@ -675,6 +678,12 @@ try {
   assert.equal(await editorFrame.locator('[data-hce-id]').count(), 0);
   assert.ok(await editorFrame.locator('text=TTFA is now measured before the first audio frame.').count() > 0);
   assert.ok(await editorFrame.locator('span[style*="font-weight: 700"]').count() > 0);
+
+  const previewBox = await page.locator('#pageFrame').boundingBox();
+  assert.ok(
+    previewBox && previewBox.height > 300,
+    `Expected Preview to use the editor workspace height, got ${previewBox?.height ?? 0}px`
+  );
 
   await page.locator('[data-mode="edit"]').click();
   await page.waitForFunction(() =>
