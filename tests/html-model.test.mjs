@@ -125,6 +125,40 @@ test('editable rendering adds markers without changing the saved source', () => 
   assert.equal(applyTextEdits(source, nodes, {}), source);
 });
 
+test('removes a sole span wrapper when all of its text is deleted', () => {
+  const source = '<p>Before <span class="boxed">Delete me</span> after</p>';
+  const nodes = extractEditableTextNodes(source);
+  const target = nodes.find((node) => node.text === 'Delete me');
+
+  assert.equal(target.emptySpanDepth, 1);
+
+  const updated = applyTextEdits(source, nodes, {
+    [target.id]: ''
+  });
+  const rendered = buildEditableHtml(source, nodes, {
+    [target.id]: ''
+  });
+
+  assert.equal(updated, '<p>Before  after</p>');
+  assert.equal(rendered, '<p>Before  after</p>');
+  assert.doesNotMatch(updated, /class="boxed"/);
+});
+
+test('keeps a span wrapper when it still contains other content', () => {
+  const source = '<p><span class="boxed">Delete <strong>keep</strong></span></p>';
+  const nodes = extractEditableTextNodes(source);
+  const target = nodes.find((node) => node.text === 'Delete');
+
+  assert.equal(target.emptySpanDepth, 0);
+
+  const updated = applyTextEdits(source, nodes, {
+    [target.id]: ''
+  });
+
+  assert.equal(updated, '<p><span class="boxed"> <strong>keep</strong></span></p>');
+  assert.match(updated, /class="boxed"/);
+});
+
 
 test('compare utility math clamps zoom and maps proportional scrolling', async () => {
   const { clampZoom, scrollRatio, scrollTopForRatio } = await import('../src/compare-utils.mjs');

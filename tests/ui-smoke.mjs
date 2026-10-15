@@ -606,6 +606,12 @@ try {
   assert.ok(await editorFrame.locator('text=TTFA is now measured before the first audio frame.').count() > 0);
   assert.ok(await editorFrame.locator('span[style*="font-weight: 700"]').count() > 0);
 
+  const previewBox = await page.locator('#pageFrame').boundingBox();
+  assert.ok(
+    previewBox && previewBox.height > 300,
+    `Expected Preview to use the editor workspace height, got ${previewBox?.height ?? 0}px`
+  );
+
   await page.locator('[data-mode="edit"]').click();
   await page.waitForFunction(() =>
     document.querySelector('#editorModeHint')?.textContent === 'Editable view'

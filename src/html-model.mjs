@@ -130,6 +130,44 @@ function semanticAlignmentBase(ancestors) {
   return null;
 }
 
+function removableSpanForText(node, ancestors) {
+  let child = node;
+  let depth = 0;
+  let range = null;
+
+  for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+    const element = ancestors[index];
+    const tagName = typeof element?.tagName === 'string'
+      ? element.tagName.toLowerCase()
+      : null;
+
+    if (tagName !== 'span') break;
+
+    const children = element.childNodes ?? [];
+    if (children.length !== 1 || children[0] !== child) break;
+
+    const location = element.sourceCodeLocation;
+    if (
+      !location?.startTag ||
+      !location?.endTag ||
+      !Number.isInteger(location.startOffset) ||
+      !Number.isInteger(location.endOffset)
+    ) {
+      break;
+    }
+
+    depth += 1;
+    range = {
+      start: location.startOffset,
+      end: location.endOffset,
+      depth
+    };
+    child = element;
+  }
+
+  return range;
+}
+
 export function escapeHtmlText(value) {
   return value
     .replaceAll('&', '&amp;')
@@ -167,6 +205,7 @@ export function extractEditableTextNodes(source) {
 
         if (text.length > 0) {
           const semanticBase = semanticAlignmentBase(ancestors);
+          const removableSpan = removableSpanForText(node, ancestors);
           let alignmentKey = null;
 
           if (semanticBase) {
@@ -181,6 +220,10 @@ export function extractEditableTextNodes(source) {
             end,
             text,
             alignmentKey,
+            emptySpanRange: removableSpan
+              ? { start: removableSpan.start, end: removableSpan.end }
+              : null,
+            emptySpanDepth: removableSpan?.depth ?? 0,
             insertAfter: insertionOffsetForText(ancestors, source.length)
           });
         }
@@ -210,10 +253,14 @@ export function applyTextEdits(source, textNodes, edits) {
     const node = byId.get(id);
     if (!node || typeof value !== 'string') continue;
 
+    const removeSpan = value.length === 0 &&
+      Number.isInteger(node.emptySpanRange?.start) &&
+      Number.isInteger(node.emptySpanRange?.end);
+
     replacements.push({
-      start: node.start,
-      end: node.end,
-      replacement: escapeHtmlText(value)
+      start: removeSpan ? node.emptySpanRange.start : node.start,
+      end: removeSpan ? node.emptySpanRange.end : node.end,
+      replacement: removeSpan ? '' : escapeHtmlText(value)
     });
   }
 
@@ -243,10 +290,22 @@ export function buildEditableHtml(source, textNodes, edits = {}) {
   let cursor = 0;
 
   for (const node of textNodes) {
+    const edited = Object.hasOwn(edits, node.id);
+    const editedValue = edited ? edits[node.id] : null;
+    const removeSpan = editedValue === '' &&
+      Number.isInteger(node.emptySpanRange?.start) &&
+      Number.isInteger(node.emptySpanRange?.end);
+
+    if (removeSpan) {
+      parts.push(source.slice(cursor, node.emptySpanRange.start));
+      cursor = node.emptySpanRange.end;
+      continue;
+    }
+
     parts.push(source.slice(cursor, node.start));
 
-    const content = Object.hasOwn(edits, node.id)
-      ? escapeHtmlText(edits[node.id])
+    const content = edited
+      ? escapeHtmlText(editedValue)
       : source.slice(node.start, node.end);
 
     parts.push(
