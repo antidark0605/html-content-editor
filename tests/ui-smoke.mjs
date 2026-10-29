@@ -472,6 +472,24 @@ try {
   const editorFrame = await editorFrameHandle.contentFrame();
   await editorFrame.waitForSelector('[data-hce-id]');
 
+  // Selecting an element removes the full heading, not just its text.
+  await page.locator('#selectElementButton').click();
+  await editorFrame.locator('h1 [data-hce-id]').click();
+  await page.waitForFunction(() => {
+    const select = document.querySelector('#elementLevelSelect');
+    return select && !select.classList.contains('hidden') &&
+      [...select.options].some((option) => option.textContent.includes('<h1>'));
+  });
+  assert.equal(await editorFrame.locator('h1.hce-element-target').count(), 1);
+  await editorFrame.locator('html').press('Delete');
+  await page.waitForFunction(() =>
+    !document.querySelector('#pageFrame')?.contentDocument?.querySelector('h1')
+  );
+  assert.ok(await editorFrame.locator('section p:has-text("This introduction is the same")').count() > 0);
+  await page.locator('#undoButton').click();
+  await editorFrame.waitForSelector('h1 [data-hce-id]');
+  await page.locator('#selectElementButton').click();
+
   assert.equal(await page.locator('#editorModeHint').textContent(), 'Editable view');
   assert.equal(await page.locator('#formatToolbar').isVisible(), true);
   assert.equal(await page.locator('[data-text-format="bold"]').isDisabled(), true);

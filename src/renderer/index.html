@@ -173,6 +173,12 @@
         <span id="formatSelectionHint" class="format-hint">Select text in one editable block to format it.</span>
 
         <span class="toolbar-separator" aria-hidden="true"></span>
+        <button id="selectElementButton" class="table-button" type="button" aria-pressed="false" disabled title="Select an HTML element, then delete it and its contents">Select element</button>
+        <select id="elementLevelSelect" class="element-level-select hidden" aria-label="Selected HTML element"></select>
+        <button id="deleteElementButton" class="table-button danger-light hidden" type="button" disabled>Delete element</button>
+        <span id="elementSelectionHint" class="format-hint hidden">Click an element in the page. Esc to exit.</span>
+
+        <span class="toolbar-separator" aria-hidden="true"></span>
         <button id="insertTableButton" class="table-button" title="Insert a simple table after the current text block">+ Table</button>
 
         <div id="tableContextTools" class="table-context-tools hidden" aria-label="Table editing">
