@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('hce', {
   formatText: (request) => ipcRenderer.invoke('html:format-selection', request),
   commitStyledText: (request) => ipcRenderer.invoke('html:commit-styled-text', request),
   tableOperation: (request) => ipcRenderer.invoke('html:table-operation', request),
+  elementCandidates: (nodeId = null) => ipcRenderer.invoke('html:element-candidates', nodeId),
+  deleteHtmlElement: (request) => ipcRenderer.invoke('html:delete-element', request),
   save: (workingSource) => ipcRenderer.invoke('file:save', workingSource),
   saveAs: (workingSource) => ipcRenderer.invoke('file:save-as', workingSource),
   diff: (workingSource) => ipcRenderer.invoke('html:diff', workingSource),

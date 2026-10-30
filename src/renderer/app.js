@@ -58,6 +58,10 @@ const elements = {
   otherColorsButton: document.querySelector('#otherColorsButton'),
   otherColorsInput: document.querySelector('#otherColorsInput'),
   formatSelectionHint: document.querySelector('#formatSelectionHint'),
+  selectElementButton: document.querySelector('#selectElementButton'),
+  elementLevelSelect: document.querySelector('#elementLevelSelect'),
+  deleteElementButton: document.querySelector('#deleteElementButton'),
+  elementSelectionHint: document.querySelector('#elementSelectionHint'),
   insertTableButton: document.querySelector('#insertTableButton'),
   tableContextTools: document.querySelector('#tableContextTools'),
   insertRowAboveButton: document.querySelector('#insertRowAboveButton'),
@@ -130,6 +134,10 @@ const state = {
   tables: [],
   workingSource: '',
   richSelection: null,
+  elementSelectMode: false,
+  elementSelection: null,
+  elementSelectionGeneration: 0,
+  elementDeletePending: false,
   editorCaret: null,
   caretTypingStyle: null,
   compositionState: null,
@@ -251,6 +259,14 @@ function editorStyle() {
     [data-hce-id].hce-search-hit {
       outline: 2px solid #d97706 !important;
       background: rgba(245, 158, 11, 0.24) !important;
+    }
+    .hce-element-target {
+      outline: 3px solid #e11d48 !important;
+      outline-offset: 2px !important;
+      box-shadow: 0 0 0 3px rgb(225 29 72 / 12%) !important;
+    }
+    html.hce-select-elements [data-hce-id] {
+      cursor: pointer !important;
     }
     td[data-hce-cell-id],
     th[data-hce-cell-id] {
@@ -594,7 +610,10 @@ function updateEditableCount() {
 function updateFormatControls() {
   const editorReady =
     state.workspaceMode === 'editor' &&
-    state.mode === 'edit';
+    state.mode === 'edit' &&
+    !state.elementSelectMode;
+  elements.selectElementButton.disabled =
+    !state.session || state.workspaceMode !== 'editor' || state.mode !== 'edit';
   const selectionReady = editorReady && Boolean(state.richSelection);
   const caretReady = editorReady && Boolean(state.editorCaret);
   const colorReady = selectionReady || caretReady;
@@ -1347,6 +1366,176 @@ async function applyTextFormat(format, value = null) {
   renderEdit();
 }
 
+
+const DEFAULT_ELEMENT_TAGS = new Set([
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p',
+  'blockquote', 'figcaption', 'ul', 'ol', 'div', 'section', 'article'
+]);
+const CONFIRM_ELEMENT_TAGS = new Set([
+  'ul', 'ol', 'div', 'section', 'article', 'aside', 'blockquote',
+  'figure', 'nav', 'header', 'footer'
+]);
+
+function updateElementSelectionControls() {
+  const selecting = state.elementSelectMode && state.mode === 'edit' &&
+    state.workspaceMode === 'editor';
+  elements.selectElementButton.classList.toggle('active', selecting);
+  elements.selectElementButton.setAttribute('aria-pressed', String(selecting));
+
+  const selection = selecting ? state.elementSelection : null;
+  elements.elementLevelSelect.classList.toggle('hidden', !selection);
+  elements.deleteElementButton.classList.toggle('hidden', !selection);
+  elements.deleteElementButton.disabled = !selection || state.elementDeletePending;
+  elements.elementSelectionHint.classList.toggle('hidden', !selecting);
+
+  const select = elements.elementLevelSelect;
+  select.replaceChildren();
+  if (selection) {
+    selection.candidates.forEach((candidate, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = `<${candidate.tag}> · ${candidate.preview || '(empty)'}`;
+      select.append(option);
+    });
+    select.value = String(selection.level);
+  }
+
+  elements.elementSelectionHint.textContent = selection
+    ? 'Delete removes this element and everything inside · Esc to exit'
+    : 'Click an element in the page · Esc to exit';
+
+  const doc = elements.pageFrame.contentDocument;
+  for (const target of doc?.querySelectorAll('.hce-element-target') ?? []) {
+    target.classList.remove('hce-element-target');
+  }
+  if (!selection || !doc) return;
+
+  const editable = doc.querySelector(`[data-hce-id="${selection.nodeId}"]`);
+  let parent = editable?.parentElement ?? null;
+  for (let index = 0; index <= selection.level; index += 1) {
+    const tag = selection.candidates[index].tag.toUpperCase();
+    while (parent && parent.tagName !== tag) parent = parent.parentElement;
+    if (!parent) return;
+    if (index === selection.level) {
+      parent.classList.add('hce-element-target');
+      return;
+    }
+    parent = parent.parentElement;
+  }
+}
+
+function clearElementSelection() {
+  state.elementSelectionGeneration += 1;
+  state.elementSelection = null;
+  updateElementSelectionControls();
+}
+
+async function chooseEditorElement(nodeId) {
+  const generation = ++state.elementSelectionGeneration;
+  const result = await window.hce.elementCandidates(nodeId);
+  if (!state.elementSelectMode || generation !== state.elementSelectionGeneration) return;
+
+  if (!result.ok) {
+    showToast(result.reason);
+    return;
+  }
+
+  const candidates = result.candidates ?? [];
+  if (!candidates.length) {
+    clearElementSelection();
+    showToast('No safely deletable element at this position.');
+    return;
+  }
+
+  const preferred = candidates.findIndex((candidate) => DEFAULT_ELEMENT_TAGS.has(candidate.tag));
+  state.elementSelection = {
+    nodeId,
+    candidates,
+    level: preferred >= 0 ? preferred : 0
+  };
+  updateElementSelectionControls();
+}
+
+async function toggleElementSelection(force = null) {
+  if (!state.session || state.mode !== 'edit' || state.workspaceMode !== 'editor') return;
+  const enabled = typeof force === 'boolean' ? force : !state.elementSelectMode;
+
+  if (enabled) {
+    await flushPendingEdits();
+    const result = await window.hce.elementCandidates();
+    if (!result.ok) {
+      showToast(result.reason);
+      return;
+    }
+    // Rebase text-node identifiers on the current working source before
+    // selecting source ranges, without changing saved HTML or Undo history.
+    state.editorSource = result.editSource;
+    state.workingSource = result.workingSource;
+    state.editorTextNodes = result.textNodes;
+    state.tables = result.tables ?? [];
+    state.edits = {};
+    updateEditableCount();
+    clearRichSelection();
+  }
+
+  state.elementSelectMode = enabled;
+  clearElementSelection();
+  renderEdit();
+}
+
+async function deleteSelectedHtmlElement() {
+  if (!state.elementSelectMode || !state.elementSelection || state.elementDeletePending) return;
+  const selection = state.elementSelection;
+  const candidate = selection.candidates[selection.level];
+  if (!candidate) return;
+
+  const broad = CONFIRM_ELEMENT_TAGS.has(candidate.tag) || candidate.end - candidate.start > 350;
+  if (broad && !window.confirm(
+    `Delete the entire <${candidate.tag}> element and all of its contents?`
+  )) return;
+
+  state.elementDeletePending = true;
+  updateElementSelectionControls();
+  try {
+    const viewport = captureEditorViewport();
+    await flushPendingEdits();
+    const before = snapshotEditorState();
+    const result = await window.hce.deleteHtmlElement({
+      textNodeId: selection.nodeId,
+      key: candidate.key
+    });
+    if (!result.ok) {
+      showToast(result.reason);
+      clearElementSelection();
+      return;
+    }
+
+    state.editorSource = result.editSource;
+    state.editorTextNodes = result.textNodes;
+    state.tables = result.tables ?? [];
+    state.workingSource = result.workingSource;
+    state.edits = {};
+    state.lastEditorNodeId = null;
+    setDirty(result.dirty);
+    updateEditableCount();
+    clearRichSelection();
+    clearTableSelection();
+
+    const after = snapshotEditorState();
+    state.undoStack.push({ type: 'snapshot', before, after });
+    state.redoStack.length = 0;
+    updateHistoryButtons();
+
+    clearElementSelection();
+    state.pendingEditorViewportRestore = viewport;
+    renderEdit();
+    showToast(`Deleted <${candidate.tag}> and its contents. Undo is available.`);
+  } finally {
+    state.elementDeletePending = false;
+    updateElementSelectionControls();
+  }
+}
+
 function wireEditableFrame() {
   const doc = elements.pageFrame.contentDocument;
   if (!doc) return;
@@ -1360,11 +1549,37 @@ function wireEditableFrame() {
   doc.addEventListener(
     'click',
     (event) => {
+      if (state.elementSelectMode) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const editable = event.target.closest?.('[data-hce-id]') ??
+          event.target.querySelector?.('[data-hce-id]');
+        if (editable) void chooseEditorElement(editable.dataset.hceId);
+        return;
+      }
       const anchor = event.target.closest?.('a');
       if (anchor) event.preventDefault();
     },
     true
   );
+
+  doc.documentElement.classList.toggle('hce-select-elements', state.elementSelectMode);
+  if (state.elementSelectMode) {
+    for (const editable of doc.querySelectorAll('[data-hce-id]')) {
+      editable.setAttribute('contenteditable', 'false');
+    }
+  }
+  doc.addEventListener('keydown', (event) => {
+    if (!state.elementSelectMode) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      void toggleElementSelection(false);
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') &&
+               state.elementSelection) {
+      event.preventDefault();
+      void deleteSelectedHtmlElement();
+    }
+  }, true);
 
   doc.addEventListener('selectionchange', () => captureRichSelection(doc));
   wireTableContext(doc);
@@ -1517,6 +1732,7 @@ function wireEditableFrame() {
   }
 
   updateFormatControls();
+  updateElementSelectionControls();
 }
 
 function editorDiffHunks() {
@@ -1711,6 +1927,10 @@ async function setMode(mode) {
 
   await flushPendingEdits();
 
+  if (mode !== 'edit') {
+    state.elementSelectMode = false;
+    clearElementSelection();
+  }
   state.mode = mode;
   for (const button of elements.modeButtons) {
     button.classList.toggle('active', button.dataset.mode === mode);
@@ -2838,6 +3058,9 @@ function loadSession(session) {
   state.tables = session.tables ?? [];
   state.workingSource = session.workingSource ?? session.source;
   state.richSelection = null;
+  state.elementSelectMode = false;
+  state.elementSelection = null;
+  state.elementSelectionGeneration += 1;
   state.editorCaret = null;
   state.tableSelection = null;
   closeColorPalette();
@@ -3054,6 +3277,14 @@ elements.undoButton.addEventListener('click', undo);
 elements.redoButton.addEventListener('click', redo);
 elements.editorPreviousDifferenceButton.addEventListener('click', () => navigateEditorDiff(-1));
 elements.editorNextDifferenceButton.addEventListener('click', () => navigateEditorDiff(1));
+
+elements.selectElementButton.addEventListener('click', () => void toggleElementSelection());
+elements.elementLevelSelect.addEventListener('change', () => {
+  if (!state.elementSelection) return;
+  state.elementSelection.level = Number(elements.elementLevelSelect.value);
+  updateElementSelectionControls();
+});
+elements.deleteElementButton.addEventListener('click', () => void deleteSelectedHtmlElement());
 
 for (const button of elements.formatButtons) {
   button.addEventListener('mousedown', (event) => event.preventDefault());

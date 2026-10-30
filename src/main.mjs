@@ -27,6 +27,7 @@ import {
   insertTableColumn,
   insertTableRow
 } from './table-model.mjs';
+import { deleteHtmlElement, listDeletableElementAncestors } from './element-model.mjs';
 import { firstUsableDirectory } from './open-path.mjs';
 import { BUILD_COMMIT } from './build-info.mjs';
 
@@ -763,6 +764,48 @@ ipcMain.handle('html:format-selection', async (_event, request) => {
       ok: false,
       reason: error instanceof Error ? error.message : String(error)
     };
+  }
+});
+
+ipcMain.handle('html:element-candidates', async (_event, textNodeId = null) => {
+  if (!session) return { ok: false, reason: 'No HTML file is open.' };
+
+  try {
+    const source = session.working;
+    return {
+      ok: true,
+      candidates: typeof textNodeId === 'string'
+        ? listDeletableElementAncestors(source, textNodeId)
+        : [],
+      editSource: source,
+      workingSource: source,
+      textNodes: extractEditableTextNodes(source),
+      tables: extractTables(source),
+      dirty: session.dirty
+    };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('html:delete-element', async (_event, request) => {
+  if (!session) return { ok: false, reason: 'No HTML file is open.' };
+
+  try {
+    const nextSource = deleteHtmlElement(session.working, request ?? {});
+    session.working = nextSource;
+    session.dirty = nextSource !== session.original;
+
+    return {
+      ok: true,
+      editSource: nextSource,
+      workingSource: nextSource,
+      textNodes: extractEditableTextNodes(nextSource),
+      tables: extractTables(nextSource),
+      dirty: session.dirty
+    };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
 });
 

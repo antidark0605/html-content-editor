@@ -13,6 +13,7 @@ Instead of serializing the whole DOM back to HTML, the app tracks the original s
 - Open `.html` / `.htm` files
 - Click highlighted visible text and edit it directly
 - Format a selected text range with bold, italic, underline, font size, text color, or background color
+- Select and delete whole HTML elements (headings, list items, entire lists, sections) without deleting each text block
 - Create and edit basic HTML tables without serializing the whole document
 - Preserve existing tags, classes, inline styles, CSS, and surrounding markup outside the selected edit range
 - Preview the modified HTML before saving in a read-only final-render view
@@ -87,6 +88,14 @@ Formatting remains intentionally constrained rather than acting like a general-p
 Selection-based formatting still requires the selection to stay inside one editable text node. A selection that crosses existing HTML element boundaries is not formatted automatically because doing so could restructure the original markup.
 
 Visual Compare continues to compare visible text content. Formatting-only HTML differences are visible in **Source Compare**.
+
+## Delete HTML elements
+
+In **Editor → Edit**, click **Select element** and then click visible text within the element you want to remove. The entire element is outlined. Use the element dropdown to choose the exact scope: for example, delete a single `<li>` link row or its enclosing `<ul>` list.
+
+Click **Delete element** or press **Delete / Backspace** to remove the selected tag **and all its contents**. Press **Esc** (or click **Select element** again) to return to normal text editing. Ordinary text-editing Delete does **not** delete entire elements.
+
+The editor makes only an exact original-source-range deletion; the rest of the HTML is preserved. Large containers prompt for confirmation, Undo/Redo is supported, and document-level elements like `<html>`, `<head>`, `<body>`, or `<main>` cannot be selected. This mode currently starts from a visible editable text block rather than image-only or empty elements.
 
 ## Basic table editing
 
