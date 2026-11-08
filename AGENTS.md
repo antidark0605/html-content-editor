@@ -52,7 +52,7 @@ For behavior changes, add or update regression coverage for the actual failure c
 - Run `npm run test:ui` when Edit, Preview, Compare, styling, interaction, or viewport behavior changes. This uses Electron and requires a suitable GUI-capable environment.
 - Run `npm run build:win` for local Windows packaging validation when the environment supports it.
 - On pull requests, the Windows GitHub Actions workflow installs dependencies, runs unit tests and Electron UI validation, and retains UI screenshots when available.
-- The Windows setup and portable executables are produced by the workflow on pushes to `main` or manual workflow dispatch; ordinary PR checks do not build those executables.
+- The Windows setup and portable executables are produced by the workflow on pushes to `main` or manual workflow dispatch; ordinary PR checks do not build those executables. A successful main push also publishes the first build of each package version on GitHub Releases with both executables and SHA256 checksums; later pushes with an unchanged version do not replace an existing Release.
 - Do not claim tests passed or a build artifact exists unless the relevant command/workflow completed successfully. If a test cannot run locally, state that clearly and rely on CI results before reporting validation.
 
 Critical regression cases include: deleting text inside a styled span without leaving an unintended empty box; preserving spans with other child content; Preview using the available workspace height; Edit/Preview output parity; formatting, table operations, Undo/Redo, and both Compare modes.
@@ -64,7 +64,7 @@ Critical regression cases include: deleting text inside a styled span without le
 3. Work on a dedicated branch and submit a focused pull request for review. Do not overwrite another agent's branch or force-push over their work.
 4. Review the diff and test evidence. Fix failing checks before merging; distinguish actual code failures from incorrect test assertions.
 5. Keep `README.md` in sync when user-facing features, limitations, or build instructions change.
-6. For a deliberate new Windows release, update the version in `package.json` and verify the resulting `main` workflow successfully uploads both setup and portable artifacts. Do not bump versions for unrelated documentation-only changes.
+6. For a deliberate new Windows release, update the version in `package.json` and verify the resulting `main` workflow successfully uploads both setup and portable artifacts **and** publishes the matching GitHub Release with SHA256 checksums. Use the Releases page as the public download link. Do not bump versions for unrelated documentation-only changes.
 7. Report what changed, the PR/commit, what was tested, what remains unverified, and where any downloadable artifacts actually reside.
 
 ## Public-repository privacy

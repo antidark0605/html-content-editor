@@ -206,6 +206,17 @@ npm run test:ui
 
 The Windows CI runs unit tests and Electron UI validation on pull requests. The UI test verifies the displayed version and About metadata, exercises Copy path using the real Electron clipboard, opens HTML through the drag-and-drop flow, edits both Visual Compare panes, verifies that deep-document edits preserve the current Compare viewport, checks Compare Undo/Redo, validates synchronized scrolling and diff-local merge controls, verifies Source rail positions, then switches to Editor, validates rich text formatting, creates and structurally edits a simple table with Undo, edits visible text, and validates Edit/Preview behavior plus Editor diff navigation/rail markers. UI validation screenshots are retained for 7 days.
 
+## Download for Windows
+
+Download the latest public release: **[HTML Content Editor on GitHub Releases](https://github.com/antidark0605/html-content-editor/releases/latest)**.
+
+- **Setup**: `HTML-Content-Editor-Setup-<version>-x64.exe` installs the desktop application.
+- **Portable**: `HTML-Content-Editor-Portable-<version>-x64.exe` can run without installation.
+- **SHA256SUMS.txt**: optional checksums for verifying downloaded binaries.
+
+The release executables are currently **unsigned**. Windows SmartScreen may warn before the first launch. Download only from the official project Release page.
+
+GitHub Actions artifacts are for CI validation and troubleshooting; they expire and should not be the public download link.
 ## Build for Windows
 
 ```bash
@@ -217,7 +228,7 @@ After changes reach `main`, GitHub Actions builds both Windows targets automatic
 - `HTML-Content-Editor-Setup-<version>-x64.exe`
 - `HTML-Content-Editor-Portable-<version>-x64.exe`
 
-Pull requests run tests without producing another full Windows binary artifact. The `main` artifact is named `HTML-Content-Editor-Windows` and is retained for 90 days while the project is still pre-release.
+Pull requests run tests without producing another full Windows binary artifact. The `main` workflow also publishes a GitHub Release when the package version has not yet been released. Releases include both executables and SHA256 checksums; each version is published only once. The `HTML-Content-Editor-Windows` Actions artifact is retained for 90 days for CI/debugging purposes.
 
 ## License
 
