@@ -1,0 +1,77 @@
+name: Publish validated v0.10.0 Windows Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.10.0.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether the release already exists
+        id: release_check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.10.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v0.10.0 already published; preserving existing assets."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download binaries from the successful v0.10.0 main build
+        if: steps.release_check.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download 40989424201 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name HTML-Content-Editor-Windows \
+            --dir dist
+
+      - name: Validate pinned build files and calculate SHA256
+        if: steps.release_check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/HTML-Content-Editor-Setup-0.10.0-x64.exe
+          test -s dist/HTML-Content-Editor-Portable-0.10.0-x64.exe
+          (cd dist && sha256sum -- *.exe > SHA256SUMS.txt)
+
+      - name: Publish v0.10.0 to GitHub Releases
+        if: steps.release_check.outputs.exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          Windows x64 desktop edition.
+
+          - Select and delete complete HTML headings, list items, and enclosing lists, with Undo/Redo.
+          - Word-style text and background color palette.
+          - Source-preserving HTML editing, Preview, Diff, and Compare.
+
+          Files: Setup installer, Portable executable, and SHA256SUMS.txt.
+
+          These executables are currently unsigned. Windows SmartScreen may show a warning.
+          The binaries come from the successful October 30 v0.10.0 main build (run 40989424201).
+          The release tag points to the exact source commit used for that build.
+          EOF
+          gh release create v0.10.0 dist/*.exe dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target a221d51ebf262387e4168f504dee31fa6f905852 \
+            --title "HTML Content Editor v0.10.0" \
+            --notes-file release-notes.md \
+            --latest
